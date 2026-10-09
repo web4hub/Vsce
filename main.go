@@ -1,16 +1,33 @@
 package main
 
-import "://github.com"
+import (
+	"log"
+	"net/http"
+)
 
 func main() {
-	r := gin.Default()
+	// Serve traditional assets (CSS, Images, etc.)
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
-	r.Static("/static", "./static")
-
-	r.GET("/manifest.webmanifest", func(c *gin.Context) {
-		c.Header("Content-Type", "application/manifest+json")
-		c.File("./static/manifest.webmanifest")
+	// Bind webmanifest route with the mandated MIME header
+	http.HandleFunc("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/manifest+json")
+		http.ServeFile(w, r, "./static/manifest.webmanifest")
 	})
 
-	r.Run(":8080")
+	// Service Worker must be mapped to root context to establish global cache scope
+	http.HandleFunc("/sw.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript")
+		http.ServeFile(w, r, "./static/sw.js")
+	})
+
+	// Map application home shell
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "./static/index.html")
+	})
+
+	log.Println("Server running smoothly at http://localhost:8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatal(err)
+	}
 }
