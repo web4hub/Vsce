@@ -21,21 +21,23 @@ suite('Code lenses for testing and benchmarking', function () {
 
 	let document: vscode.TextDocument;
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const ctx = new MockExtensionContext() as any;
-	const cancellationTokenSource = new vscode.CancellationTokenSource();
 
 	const projectDir = path.join(__dirname, '..', '..', '..');
 	const testdataDir = path.join(projectDir, 'test', 'testdata', 'codelens');
 	const env = new Env();
 
-	this.afterEach(async function () {
+	this.afterEach(function () {
 		// Note: this shouldn't use () => {...}. Arrow functions do not have 'this'.
 		// I don't know why but this.currentTest.state does not have the expected value when
 		// used with teardown.
 		env.flushTrace(this.currentTest?.state === 'failed');
 		sinon.restore();
 	});
+
+	// updaetGoVarsFromConfig mutates env vars. Cache the value
+	// so we can restore it in suiteTeardown.
+	const prevEnv = Object.assign({}, process.env);
 
 	suiteSetup(async () => {
 		await updateGoVarsFromConfig({});
@@ -47,6 +49,7 @@ suite('Code lenses for testing and benchmarking', function () {
 
 	suiteTeardown(async () => {
 		await env.teardown();
+		process.env = prevEnv;
 	});
 
 	test('Subtests - runs a test with cursor on t.Run line', async () => {
@@ -102,7 +105,7 @@ suite('Code lenses for testing and benchmarking', function () {
 
 	test('Test codelenses', async () => {
 		const codeLensProvider = new GoRunTestCodeLensProvider(env.goCtx);
-		const codeLenses = await codeLensProvider.provideCodeLenses(document, cancellationTokenSource.token);
+		const codeLenses = await codeLensProvider.provideCodeLenses(document);
 		assert.equal(codeLenses.length, 8);
 		const wantCommands = [
 			'go.test.package',
@@ -123,7 +126,7 @@ suite('Code lenses for testing and benchmarking', function () {
 		const codeLensProvider = new GoRunTestCodeLensProvider(env.goCtx);
 		const uri = vscode.Uri.file(path.join(testdataDir, 'codelens_benchmark_test.go'));
 		const benchmarkDocument = await vscode.workspace.openTextDocument(uri);
-		const codeLenses = await codeLensProvider.provideCodeLenses(benchmarkDocument, cancellationTokenSource.token);
+		const codeLenses = await codeLensProvider.provideCodeLenses(benchmarkDocument);
 		assert.equal(codeLenses.length, 6);
 		const wantCommands = [
 			'go.test.package',
@@ -140,9 +143,9 @@ suite('Code lenses for testing and benchmarking', function () {
 
 	test('Test codelenses include only valid test function names', async () => {
 		const codeLensProvider = new GoRunTestCodeLensProvider(env.goCtx);
-		const uri = vscode.Uri.file(path.join(testdataDir, 'codelens2_test.go'));
+		const uri = vscode.Uri.file(path.join(testdataDir, 'testnames', 'testnames_test.go'));
 		const benchmarkDocument = await vscode.workspace.openTextDocument(uri);
-		const codeLenses = await codeLensProvider.provideCodeLenses(benchmarkDocument, cancellationTokenSource.token);
+		const codeLenses = await codeLensProvider.provideCodeLenses(benchmarkDocument);
 		assert.equal(codeLenses.length, 20, JSON.stringify(codeLenses, null, 2));
 		const found = [] as string[];
 		for (let i = 0; i < codeLenses.length; i++) {
@@ -170,7 +173,7 @@ suite('Code lenses for testing and benchmarking', function () {
 		const codeLensProvider = new GoRunTestCodeLensProvider(env.goCtx);
 		const uri = vscode.Uri.file(path.join(testdataDir, 'codelens_go118_test.go'));
 		const testDocument = await vscode.workspace.openTextDocument(uri);
-		const codeLenses = await codeLensProvider.provideCodeLenses(testDocument, cancellationTokenSource.token);
+		const codeLenses = await codeLensProvider.provideCodeLenses(testDocument);
 		assert.equal(codeLenses.length, 8, JSON.stringify(codeLenses, null, 2));
 		const found = [] as string[];
 		for (let i = 0; i < codeLenses.length; i++) {
@@ -188,7 +191,7 @@ suite('Code lenses for testing and benchmarking', function () {
 		const codeLensProvider = new GoRunTestCodeLensProvider(env.goCtx);
 		const uri = vscode.Uri.file(path.join(testdataDir, 'testmain/testmain_test.go'));
 		const testDocument = await vscode.workspace.openTextDocument(uri);
-		const codeLenses = await codeLensProvider.provideCodeLenses(testDocument, cancellationTokenSource.token);
+		const codeLenses = await codeLensProvider.provideCodeLenses(testDocument);
 		assert.equal(codeLenses.length, 4, JSON.stringify(codeLenses, null, 2));
 		const found = [] as string[];
 		for (let i = 0; i < codeLenses.length; i++) {
@@ -229,16 +232,14 @@ suite('Code lenses for testing and benchmarking', function () {
 });
 
 suite('Code lenses with stretchr/testify/suite', function () {
-	if (process.platform === 'win32') {
-		this.timeout(20000); // Gopls on windows needs more time to load required modules.
-	}
+	this.timeout(20000); // Gopls needs to load modules from the internet for this test.
 
 	const ctx = MockExtensionContext.new();
 
 	const testdataDir = path.join(__dirname, '..', '..', '..', 'test', 'testdata', 'stretchrTestSuite');
 	const env = new Env();
 
-	this.afterEach(async function () {
+	this.afterEach(function () {
 		// Note: this shouldn't use () => {...}. Arrow functions do not have 'this'.
 		// I don't know why but this.currentTest.state does not have the expected value when
 		// used with teardown.

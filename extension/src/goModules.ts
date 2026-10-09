@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -142,9 +141,9 @@ export const goModInit: CommandFactory = () => async () => {
 	try {
 		const env = toolExecutionEnvironment();
 		const cwd = getWorkspaceFolderPath() ?? '';
-		outputChannel.appendLine(`Running "${goRuntimePath} mod init ${moduleName}"`);
+		outputChannel.info(`Running "${goRuntimePath} mod init ${moduleName}"`);
 		await execFile(goRuntimePath, ['mod', 'init', moduleName], { env, cwd });
-		outputChannel.appendLine('Module successfully initialized. You are ready to Go :)');
+		outputChannel.info('Module successfully initialized. You are ready to Go :)');
 		vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.join(cwd, 'go.mod')));
 	} catch (e) {
 		outputChannel.error((e as Error).message);

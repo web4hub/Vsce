@@ -1,7 +1,9 @@
 module github.com/golang/vscode-go
 
-go 1.21
+go 1.26.0
 
-require golang.org/x/telemetry v0.0.0-20240712210958-268b4a8ec2d7
+require golang.org/x/telemetry v0.0.0-20260717140457-bdb89881bb75
 
-require golang.org/x/sys v0.22.0 // indirect
+require github.com/google/pprof v0.0.0-20260709232956-b9395ee17fa0
+
+require golang.org/x/sys v0.47.0 // indirect

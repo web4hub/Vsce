@@ -1,8 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable no-useless-escape */
 /* eslint-disable no-async-promise-executor */
 /* eslint-disable no-prototype-builtins */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -152,10 +150,9 @@ export function getTestTags(goConfig: vscode.WorkspaceConfiguration): string {
  */
 export async function getTestFunctions(
 	goCtx: GoExtensionContext,
-	doc: vscode.TextDocument,
-	token?: vscode.CancellationToken
+	doc: vscode.TextDocument
 ): Promise<vscode.DocumentSymbol[] | undefined> {
-	const result = await getTestFunctionsAndTestifyHint(goCtx, doc, token);
+	const result = await getTestFunctionsAndTestifyHint(goCtx, doc);
 	return result.testFunctions;
 }
 
@@ -166,8 +163,7 @@ export async function getTestFunctions(
  */
 export async function getTestFunctionsAndTestifyHint(
 	goCtx: GoExtensionContext,
-	doc: vscode.TextDocument,
-	token?: vscode.CancellationToken
+	doc: vscode.TextDocument
 ): Promise<{ testFunctions?: vscode.DocumentSymbol[]; foundTestifyTestFunction?: boolean }> {
 	const documentSymbolProvider = GoDocumentSymbolProvider(goCtx, true);
 	const symbols = await documentSymbolProvider.provideDocumentSymbols(doc);
@@ -298,8 +294,7 @@ export function findAllTestSuiteRuns(
  */
 export async function getBenchmarkFunctions(
 	goCtx: GoExtensionContext,
-	doc: vscode.TextDocument,
-	token?: vscode.CancellationToken
+	doc: vscode.TextDocument
 ): Promise<vscode.DocumentSymbol[] | undefined> {
 	const documentSymbolProvider = GoDocumentSymbolProvider(goCtx);
 	const symbols = await documentSymbolProvider.provideDocumentSymbols(doc);
@@ -323,11 +318,7 @@ export type SuiteToTestMap = Record<string, vscode.DocumentSymbol>;
  * @param the URI of a Go source file.
  * @return function symbols from all source files of the package, mapped by target suite names.
  */
-export async function getSuiteToTestMap(
-	goCtx: GoExtensionContext,
-	doc: vscode.TextDocument,
-	token?: vscode.CancellationToken
-) {
+export async function getSuiteToTestMap(goCtx: GoExtensionContext, doc: vscode.TextDocument) {
 	// Get all the package documents.
 	const packageDir = path.parse(doc.fileName).dir;
 	const packageContent = await fs.readdir(packageDir, { withFileTypes: true });
@@ -337,12 +328,12 @@ export async function getSuiteToTestMap(
 		.map((dirent) => dirent.name)
 		.filter((name) => name.endsWith('.go'));
 	const packageDocs = await Promise.all(
-		packageFilenames.map((e) => path.join(packageDir, e)).map(vscode.workspace.openTextDocument)
+		packageFilenames.map((e) => vscode.workspace.openTextDocument(path.join(packageDir, e)))
 	);
 
 	const suiteToTest: SuiteToTestMap = {};
 	for (const packageDoc of packageDocs) {
-		const funcs = await getTestFunctions(goCtx, packageDoc, token);
+		const funcs = await getTestFunctions(goCtx, packageDoc);
 		if (!funcs) {
 			continue;
 		}
@@ -426,7 +417,7 @@ export async function goTest(testconfig: TestConfig): Promise<boolean> {
 
 	let testResult = false;
 	try {
-		testResult = await new Promise<boolean>(async (resolve, reject) => {
+		testResult = await new Promise<boolean>(async (resolve) => {
 			const testEnvVars = getTestEnvVars(testconfig.goConfig);
 			const tp = cp.spawn(goRuntimePath, args, { env: testEnvVars, cwd: testconfig.dir });
 			const outBuf = new LineBuffer();
@@ -441,7 +432,7 @@ export async function goTest(testconfig: TestConfig): Promise<boolean> {
 						currentGoWorkspace,
 						outputChannel,
 						testconfig.goTestOutputConsumer
-				  )
+					)
 				: processTestResultLineInStandardMode(pkgMap, currentGoWorkspace, testResultLines, outputChannel);
 
 			outBuf.onLine((line) => processTestResultLine(line));
@@ -465,7 +456,7 @@ export async function goTest(testconfig: TestConfig): Promise<boolean> {
 
 			statusBarItem.show();
 
-			tp.on('close', (code, signal) => {
+			tp.on('close', (code) => {
 				outBuf.done();
 				errBuf.done();
 
@@ -544,7 +535,8 @@ export function computeTestCommand(
 	tmpCoverPath?: string; // coverage file path if coverage info is necessary.
 	addJSONFlag: boolean | undefined; // true if we add extra -json flag for stream processing.
 } {
-	const args: Array<string> = ['test'];
+	// By default, enable full path mode to address golang/vscode-go#3853.
+	const args: Array<string> = ['test', '-test.fullpath=true'];
 	// user-specified flags
 	const argsFlagIdx = testconfig.flags?.indexOf('-args') ?? -1;
 	const userFlags = argsFlagIdx < 0 ? testconfig.flags : testconfig.flags.slice(0, argsFlagIdx);
@@ -696,9 +688,9 @@ export function showTestOutput() {
  * Iterates the list of currently running test processes and kills them all.
  */
 export function cancelRunningTests(): Thenable<boolean> {
-	return new Promise<boolean>((resolve, reject) => {
+	return new Promise<boolean>((resolve) => {
 		runningTestProcesses.forEach((tp) => {
-			killProcessTree(tp);
+			void killProcessTree(tp);
 		});
 		// All processes are now dead. Empty the array to prepare for the next run.
 		runningTestProcesses.splice(0, runningTestProcesses.length);

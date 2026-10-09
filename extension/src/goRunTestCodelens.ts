@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -8,38 +6,56 @@
 'use strict';
 
 import vscode = require('vscode');
-import { CancellationToken, CodeLens, TextDocument } from 'vscode';
+import { CodeLens, TextDocument } from 'vscode';
 import { getGoConfig } from './config';
-import { GoBaseCodeLensProvider } from './goBaseCodelens';
 import { GoDocumentSymbolProvider } from './goDocumentSymbols';
 import { getBenchmarkFunctions, getTestFunctions } from './testUtils';
 import { GoExtensionContext } from './context';
 import { GO_MODE } from './goMode';
+import { experiments } from './experimental';
 
-export class GoRunTestCodeLensProvider extends GoBaseCodeLensProvider {
+export class GoRunTestCodeLensProvider implements vscode.CodeLensProvider {
+	private enabled = true;
+	private onDidChangeCodeLensesEmitter = new vscode.EventEmitter<void>();
+
+	public get onDidChangeCodeLenses(): vscode.Event<void> {
+		return this.onDidChangeCodeLensesEmitter.event;
+	}
+
+	public setEnabled(enabled: boolean): void {
+		if (this.enabled !== enabled) {
+			this.enabled = enabled;
+			this.onDidChangeCodeLensesEmitter.fire();
+		}
+	}
+
 	static activate(ctx: vscode.ExtensionContext, goCtx: GoExtensionContext) {
 		const testCodeLensProvider = new this(goCtx);
+		const setEnabled = () => {
+			const updatedGoConfig = getGoConfig();
+			if (updatedGoConfig['enableCodeLens']) {
+				testCodeLensProvider.setEnabled(
+					updatedGoConfig['enableCodeLens']['runtest'] && !experiments.testExplorer
+				);
+			}
+		};
+
 		ctx.subscriptions.push(vscode.languages.registerCodeLensProvider(GO_MODE, testCodeLensProvider));
+		ctx.subscriptions.push(experiments.onDidChange(() => setEnabled()));
 		ctx.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration(async (e: vscode.ConfigurationChangeEvent) => {
-				if (!e.affectsConfiguration('go')) {
-					return;
-				}
-				const updatedGoConfig = getGoConfig();
-				if (updatedGoConfig['enableCodeLens']) {
-					testCodeLensProvider.setEnabled(updatedGoConfig['enableCodeLens']['runtest']);
+				if (e.affectsConfiguration('go')) {
+					setEnabled();
 				}
 			})
 		);
 	}
 
-	constructor(private readonly goCtx: GoExtensionContext) {
-		super();
-	}
+	constructor(private readonly goCtx: GoExtensionContext) {}
 
 	private readonly benchmarkRegex = /^Benchmark.+/;
 
-	public async provideCodeLenses(document: TextDocument, token: CancellationToken): Promise<CodeLens[]> {
+	public async provideCodeLenses(document: TextDocument): Promise<CodeLens[]> {
 		if (!this.enabled) {
 			return [];
 		}
@@ -51,13 +67,13 @@ export class GoRunTestCodeLensProvider extends GoBaseCodeLensProvider {
 		}
 
 		const codelenses = await Promise.all([
-			this.getCodeLensForPackage(document, token),
-			this.getCodeLensForFunctions(document, token)
+			this.getCodeLensForPackage(document),
+			this.getCodeLensForFunctions(document)
 		]);
 		return ([] as CodeLens[]).concat(...codelenses);
 	}
 
-	private async getCodeLensForPackage(document: TextDocument, token: CancellationToken): Promise<CodeLens[]> {
+	private async getCodeLensForPackage(document: TextDocument): Promise<CodeLens[]> {
 		const documentSymbolProvider = GoDocumentSymbolProvider(this.goCtx);
 		const symbols = await documentSymbolProvider.provideDocumentSymbols(document);
 		if (!symbols || symbols.length === 0) {
@@ -93,11 +109,11 @@ export class GoRunTestCodeLensProvider extends GoBaseCodeLensProvider {
 		return packageCodeLens;
 	}
 
-	private async getCodeLensForFunctions(document: TextDocument, token: CancellationToken): Promise<CodeLens[]> {
+	private async getCodeLensForFunctions(document: TextDocument): Promise<CodeLens[]> {
 		const testPromise = async (): Promise<CodeLens[]> => {
 			const codelens: CodeLens[] = [];
 
-			const testFunctions = await getTestFunctions(this.goCtx, document, token);
+			const testFunctions = await getTestFunctions(this.goCtx, document);
 			if (!testFunctions) {
 				return codelens;
 			}
@@ -150,7 +166,7 @@ export class GoRunTestCodeLensProvider extends GoBaseCodeLensProvider {
 		};
 
 		const benchmarkPromise = async (): Promise<CodeLens[]> => {
-			const benchmarkFunctions = await getBenchmarkFunctions(this.goCtx, document, token);
+			const benchmarkFunctions = await getBenchmarkFunctions(this.goCtx, document);
 			if (!benchmarkFunctions) {
 				return [];
 			}

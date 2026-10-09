@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -12,8 +10,7 @@ import vscode = require('vscode');
 import { ExecuteCommandRequest, ExecuteCommandParams } from 'vscode-languageserver-protocol';
 import { toolExecutionEnvironment } from './goEnv';
 import { promptForMissingTool } from './goInstallTools';
-import { getImportablePackages } from './goPackages';
-import { getBinPath, getImportPath, parseFilePrelude } from './util';
+import { getBinPath, getImportPath } from './util';
 import { getEnvPath, getCurrentGoRoot } from './utils/pathUtils';
 import { GoExtensionContext } from './context';
 import { CommandFactory } from './commands';
@@ -55,7 +52,7 @@ async function askUserForImport(goCtx: GoExtensionContext): Promise<string | und
 		return vscode.window.showQuickPick(packages);
 	} catch (err) {
 		if (typeof err === 'string' && err.startsWith(missingToolMsg)) {
-			promptForMissingTool(err.substr(missingToolMsg.length));
+			void promptForMissingTool(err.substr(missingToolMsg.length));
 		}
 	}
 }
@@ -67,7 +64,7 @@ export const addImport: CommandFactory = (ctx, goCtx) => (arg: { importPath: str
 		return;
 	}
 	const p = arg && arg.importPath ? Promise.resolve(arg.importPath) : askUserForImport(goCtx);
-	p.then(async (imp) => {
+	void p.then(async (imp) => {
 		if (!imp) {
 			return;
 		}
@@ -144,7 +141,7 @@ export const addImportToWorkspace: CommandFactory = () => () => {
 	}
 	const env = toolExecutionEnvironment();
 
-	cp.execFile(goRuntimePath, ['list', '-f', '{{.Dir}}', importPath], { env }, (err, stdout, stderr) => {
+	cp.execFile(goRuntimePath, ['list', '-f', '{{.Dir}}', importPath], { env }, (err, stdout) => {
 		const dirs = (stdout || '').split('\n');
 		if (!dirs.length || !dirs[0].trim()) {
 			vscode.window.showErrorMessage(`Could not find package ${importPath}`);

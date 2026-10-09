@@ -4,9 +4,7 @@
  *--------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { LanguageClient } from 'vscode-languageclient/node';
-
-import { LanguageServerConfig, Restart, ServerInfo } from './language/goLanguageServer';
+import { GoLanguageClient, LanguageServerConfig, Restart, ServerInfo } from './language/goLanguageServer';
 import { LegacyLanguageService } from './language/registerDefaultProviders';
 import { TelemetryService } from './goTelemetry';
 
@@ -14,12 +12,12 @@ import { TelemetryService } from './goTelemetry';
 // They are global so that the server can be easily restarted with
 // new configurations.
 export interface GoExtensionContext {
-	languageClient?: LanguageClient;
+	languageClient?: GoLanguageClient;
 	legacyLanguageService?: LegacyLanguageService;
 	latestConfig?: LanguageServerConfig;
 	telemetryService?: TelemetryService;
-	serverOutputChannel?: vscode.OutputChannel; // server-side output.
-	serverTraceChannel?: vscode.OutputChannel; // client-side tracing.
+	serverOutputChannel?: vscode.LogOutputChannel; // server-side output.
+	serverTraceChannel?: vscode.LogOutputChannel; // client-side tracing.
 
 	languageServerIsRunning?: boolean;
 	// serverInfo is the information from the server received during initialization.

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Go PWA App</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#00add8">
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f7f9fa;
+        }
+        .card {
+            text-align: center;
+            padding: 2.5rem;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        h1 { color: #00add8; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Go Web App Architecture</h1>
+        <p>Your web application shell is actively being cached for offline performance.</p>
+    </div>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then((reg) => console.log('PWA Service Worker online. Scope:', reg.scope))
+                    .catch((err) => console.error('PWA Activation failed:', err));
+            });
+        }
+    </script>
+</body>
+</html>

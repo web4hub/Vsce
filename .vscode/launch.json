@@ -1,5 +1,5 @@
 {
-	"version": "0.2.0",
+	"version": "2.0.1",
 	"configurations": [
 		{
 			"name": "Launch tools/generate",
@@ -46,6 +46,7 @@
 				"999999"
 			],
 			"env": {
+				"GOTOOLCHAIN": "local",  // Avoid toolchain switch caused by extension/go.mod.
 				"VSCODE_GO_IN_TEST": "1",  // Disable code that shouldn't be used in test
 				"MOCHA_TIMEOUT": "999999",
 			},
@@ -72,6 +73,7 @@
 				"--timeout", "999999",
 			],
 			"env": {
+				"GOTOOLCHAIN": "local",  // Avoid toolchain switch caused by extension/go.mod.
 				"VSCODE_GO_IN_TEST": "1"  // Disable code that shouldn't be used in test
 			},
 			"outFiles": [

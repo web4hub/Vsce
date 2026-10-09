@@ -1,4 +1,3 @@
-/* eslint-disable node/no-unpublished-import */
 /*---------------------------------------------------------
  * Copyright 2023 The Go Authors. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -9,6 +8,7 @@ import { describe, it } from 'mocha';
 import {
 	GOPLS_MAYBE_PROMPT_FOR_TELEMETRY,
 	TELEMETRY_START_TIME_KEY,
+	TelemetryKey,
 	TelemetryReporter,
 	TelemetryService,
 	recordTelemetryStartTime
@@ -33,8 +33,7 @@ describe('# prompt for telemetry', async () => {
 		testTelemetryPrompt(
 			{
 				noLangClient: true,
-				previewExtension: true,
-				samplingInterval: 1000
+				previewExtension: true
 			},
 			false
 		)
@@ -44,8 +43,7 @@ describe('# prompt for telemetry', async () => {
 		testTelemetryPrompt(
 			{
 				goplsWithoutTelemetry: true,
-				previewExtension: true,
-				samplingInterval: 1000
+				previewExtension: true
 			},
 			false
 		)
@@ -54,8 +52,7 @@ describe('# prompt for telemetry', async () => {
 		'prompt when telemetry started a while ago',
 		testTelemetryPrompt(
 			{
-				firstDate: new Date('2022-01-01'),
-				samplingInterval: 1000
+				firstDate: new Date('2022-01-01')
 			},
 			true
 		)
@@ -64,8 +61,7 @@ describe('# prompt for telemetry', async () => {
 		'do not prompt if telemetry started two days ago',
 		testTelemetryPrompt(
 			{
-				firstDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // two days ago!
-				samplingInterval: 1000
+				firstDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // two days ago!
 			},
 			false
 		)
@@ -74,40 +70,7 @@ describe('# prompt for telemetry', async () => {
 		'do not prompt if gopls with telemetry never ran',
 		testTelemetryPrompt(
 			{
-				firstDate: undefined, // gopls with telemetry not seen before.
-				samplingInterval: 1000
-			},
-			false
-		)
-	);
-	it(
-		'do not prompt if not sampled',
-		testTelemetryPrompt(
-			{
-				firstDate: new Date('2022-01-01'),
-				samplingInterval: 0
-			},
-			false
-		)
-	);
-	it(
-		'prompt only if sampled (machineID = 0, samplingInterval = 1)',
-		testTelemetryPrompt(
-			{
-				firstDate: new Date('2022-01-01'),
-				samplingInterval: 1,
-				hashMachineID: 0
-			},
-			true
-		)
-	);
-	it(
-		'prompt only if sampled (machineID = 1, samplingInterval = 1)',
-		testTelemetryPrompt(
-			{
-				firstDate: new Date('2022-01-01'),
-				samplingInterval: 1,
-				hashMachineID: 1
+				firstDate: undefined // gopls with telemetry not seen before.
 			},
 			false
 		)
@@ -117,8 +80,7 @@ describe('# prompt for telemetry', async () => {
 		testTelemetryPrompt(
 			{
 				firstDate: new Date('2022-01-01'),
-				previewExtension: true,
-				samplingInterval: 0
+				previewExtension: true
 			},
 			true
 		)
@@ -129,8 +91,7 @@ describe('# prompt for telemetry', async () => {
 			{
 				firstDate: new Date('2022-01-01'),
 				vsTelemetryDisabled: true,
-				previewExtension: true,
-				samplingInterval: 1000
+				previewExtension: true
 			},
 			false
 		)
@@ -145,7 +106,6 @@ describe('# prompt for telemetry', async () => {
 		testExtensionAPI.globalState.update(TELEMETRY_START_TIME_KEY, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
 		await testTelemetryPrompt(
 			{
-				samplingInterval: 1000,
 				mementoInstance: testExtensionAPI.globalState
 			},
 			true
@@ -159,8 +119,6 @@ interface testCase {
 	firstDate?: Date; // first date the extension observed gopls with telemetry feature.
 	previewExtension?: boolean; // assume we are in dev/nightly extension.
 	vsTelemetryDisabled?: boolean; // assume the user disabled vscode general telemetry.
-	samplingInterval: number; // N where N out of 1000 are sampled.
-	hashMachineID?: number; // stub the machine id hash computation function.
 	mementoInstance?: Memento; // if set, use this instead of mock memento.
 }
 
@@ -181,10 +139,7 @@ function testTelemetryPrompt(tc: testCase, wantPrompt: boolean) {
 		const commands = tc.goplsWithoutTelemetry ? [] : [GOPLS_MAYBE_PROMPT_FOR_TELEMETRY];
 
 		const sut = new TelemetryService(lc, memento, commands);
-		if (tc.hashMachineID !== undefined) {
-			sinon.stub(sut, 'hashMachineID').returns(tc.hashMachineID);
-		}
-		await sut.promptForTelemetry(!!tc.previewExtension, !tc.vsTelemetryDisabled, tc.samplingInterval);
+		await sut.promptForTelemetry(!tc.vsTelemetryDisabled);
 		if (wantPrompt) {
 			sinon.assert.calledOnce(spy);
 		} else {
@@ -194,7 +149,7 @@ function testTelemetryPrompt(tc: testCase, wantPrompt: boolean) {
 }
 
 describe('# telemetry reporter using vscgo', async function () {
-	this.timeout(10000); // go install can be slow.
+	this.timeout(20000); // go install can be slow.
 	// installVSCGO expects
 	//   {extensionPath}/vscgo: vscgo source code for testing.
 	//   {extensionPath}/bin: where compiled vscgo will be stored.
@@ -218,23 +173,24 @@ describe('# telemetry reporter using vscgo', async function () {
 		} catch (e) {
 			assert.fail(`failed to install vscgo needed for testing: ${e}`);
 		}
+		console.log(`vscgo installed: ${vscgo}`);
 	});
 	suiteTeardown(() => {
 		rmdirRecursive(tmpDir);
 		if (executableFileExists(vscgo)) {
-			fs.unlink(vscgo);
+			void fs.unlink(vscgo);
 		}
 	});
 
 	teardown(() => {
 		if (fileExists(counterfile)) {
-			fs.unlink(counterfile);
+			void fs.unlink(counterfile);
 		}
 	});
 
 	it('add succeeds before telemetryReporter.setTool runs', () => {
-		sut.add('hello', 1);
-		sut.add('world', 2);
+		sut.add(TelemetryKey.VSCGO_INSTALL, 1);
+		sut.add(TelemetryKey.VSCGO_INSTALL_FAIL, 2);
 	});
 
 	it('flush is noop before setTool', async () => {
@@ -246,13 +202,13 @@ describe('# telemetry reporter using vscgo', async function () {
 		sut.setTool(vscgo);
 		await sut.flush();
 		const readAll = fs.readFileSync(counterfile).toString();
-		assert(readAll.includes('hello 1\n') && readAll.includes('world 2\n'), readAll);
+		assert(readAll.includes('vscgo_install 1\n') && readAll.includes('vscgo_install_fail 2\n'), readAll);
 	});
 
 	it('dispose triggers flush', async () => {
-		sut.add('bye', 3);
+		sut.add(TelemetryKey.ACTIVATION_LATENCY_GE_5S, 3);
 		await sut.dispose();
 		const readAll = fs.readFileSync(counterfile).toString();
-		assert(readAll.includes('bye 3\n'), readAll);
+		assert(readAll.includes('activation_latency:>=5s 3\n'), readAll);
 	});
 });

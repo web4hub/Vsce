@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -109,7 +107,7 @@ async function goListPkgs(workDir?: string): Promise<Map<string, PackageInfo>> {
 }
 
 function getAllPackagesNoCache(workDir: string): Promise<Map<string, PackageInfo>> {
-	return new Promise<Map<string, PackageInfo>>((resolve, reject) => {
+	return new Promise<Map<string, PackageInfo>>((resolve) => {
 		// Use subscription style to guard costly/long running invocation
 		const callback = (pkgMap: Map<string, PackageInfo>) => {
 			resolve(pkgMap);
@@ -126,7 +124,7 @@ function getAllPackagesNoCache(workDir: string): Promise<Map<string, PackageInfo
 		if (!goListPkgsRunning.has(workDir)) {
 			goListPkgsRunning.add(workDir);
 
-			goListPkgs(workDir).then((pkgMap) => {
+			void goListPkgs(workDir).then((pkgMap) => {
 				goListPkgsRunning.delete(workDir);
 				goListPkgsSubscriptions.delete(workDir);
 				subs?.forEach((cb) => cb(pkgMap));
@@ -273,7 +271,7 @@ export function getImportPathToFolder(targets: string[], cwd?: string): Promise<
 		return Promise.resolve(new Map());
 	}
 
-	return new Promise<Map<string, string>>((resolve, reject) => {
+	return new Promise<Map<string, string>>((resolve) => {
 		const childProcess = cp.spawn(
 			goRuntimePath,
 			['list', '-e', '-f', 'ImportPath: {{.ImportPath}} FolderPath: {{.Dir}}', ...targets],
@@ -284,7 +282,7 @@ export function getImportPathToFolder(targets: string[], cwd?: string): Promise<
 			chunks.push(stdout);
 		});
 
-		childProcess.on('close', async (status) => {
+		childProcess.on('close', async () => {
 			const lines = chunks.join('').toString().split('\n');
 			const result = new Map<string, string>();
 
@@ -293,7 +291,7 @@ export function getImportPathToFolder(targets: string[], cwd?: string): Promise<
 				if (!matches || matches.length !== 3) {
 					return;
 				}
-				const [_, pkgPath, folderPath] = matches;
+				const [, pkgPath, folderPath] = matches;
 				if (!pkgPath) {
 					return;
 				}

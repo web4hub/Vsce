@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -12,9 +11,18 @@ import vscode = require('vscode');
 import { getGoConfig } from '../../config';
 import { toolExecutionEnvironment } from '../../goEnv';
 import { promptForMissingTool, promptForUpdatingTool } from '../../goInstallTools';
-import { getBinPath, resolvePath } from '../../util';
+import { getBinPath } from '../../util';
 import { killProcessTree } from '../../utils/processUtils';
+import { resolvePath } from '../../util';
 
+/**
+ * GoDocumentFormattingEditProvider is a feature that provides formatting
+ * functionality. It is only used when the user has configured a formatter in
+ * the "go.formatTool" setting.
+ *
+ * By default, the Go extension uses the language server (gopls) to provide
+ * formatting, so this class is not instantiated.
+ */
 export class GoDocumentFormattingEditProvider implements vscode.DocumentFormattingEditProvider {
 	public provideDocumentFormattingEdits(
 		document: vscode.TextDocument,
@@ -27,7 +35,7 @@ export class GoDocumentFormattingEditProvider implements vscode.DocumentFormatti
 
 		const filename = document.fileName;
 		const goConfig = getGoConfig(document.uri);
-		const formatFlags = goConfig['formatFlags'].slice() || [];
+		const formatFlags = goConfig.get<string[]>('formatFlags') ?? [];
 
 		// Ignore -w because we don't want to write directly to disk.
 		if (formatFlags.indexOf('-w') > -1) {
@@ -48,11 +56,26 @@ export class GoDocumentFormattingEditProvider implements vscode.DocumentFormatti
 			formatFlags.push('-style=indent=' + options.tabSize);
 		}
 
-		return this.runFormatter(formatTool, formatFlags, document, token).then(
+		const resolvedFormatFlags: string[] = [];
+		formatFlags.forEach((flag) => {
+			// Ensure that flags like --config=${workspaceFolder} are resolved before their use.
+			if (flag.startsWith('--config=') || flag.startsWith('-config=')) {
+				let configFilePath = flag.substring(flag.indexOf('=') + 1).trim();
+				if (!configFilePath) {
+					return;
+				}
+				configFilePath = resolvePath(configFilePath);
+				resolvedFormatFlags.push(`${flag.substring(0, flag.indexOf('=') + 1)}${configFilePath}`);
+				return;
+			}
+			resolvedFormatFlags.push(flag);
+		});
+
+		return this.runFormatter(formatTool, resolvedFormatFlags, document, token).then(
 			(edits) => edits,
 			(err) => {
 				if (typeof err === 'string' && err.startsWith('flag provided but not defined: -srcdir')) {
-					promptForUpdatingTool(formatTool);
+					void promptForUpdatingTool(formatTool);
 					return Promise.resolve([]);
 				}
 				if (err) {
@@ -76,7 +99,7 @@ export class GoDocumentFormattingEditProvider implements vscode.DocumentFormatti
 		const formatCommandBinPath = getBinPath(formatTool);
 		if (!path.isAbsolute(formatCommandBinPath)) {
 			// executable not found.
-			promptForMissingTool(formatTool);
+			void promptForMissingTool(formatTool);
 			return Promise.reject('failed to find tool ' + formatTool);
 		}
 		return new Promise<vscode.TextEdit[]>((resolve, reject) => {
@@ -93,7 +116,7 @@ export class GoDocumentFormattingEditProvider implements vscode.DocumentFormatti
 			p.stderr.on('data', (data) => (stderr += data));
 			p.on('error', (err) => {
 				if (err && (<any>err).code === 'ENOENT') {
-					promptForMissingTool(formatTool);
+					void promptForMissingTool(formatTool);
 					return reject(`failed to find format tool: ${formatTool}`);
 				}
 			});
@@ -118,33 +141,24 @@ export class GoDocumentFormattingEditProvider implements vscode.DocumentFormatti
 	}
 }
 
-export function usingCustomFormatTool(goConfig: { [key: string]: any }): boolean {
-	const formatTool = getFormatTool(goConfig);
-	switch (formatTool) {
-		case 'goreturns':
-			return false;
-		case 'goimports':
-			return false;
-		case 'gofmt':
-			return false;
-		case 'gofumpt':
-			// TODO(rstambler): Prompt to configure setting in gopls.
-			return false;
-		case 'gofumports':
-			// TODO(rstambler): Prompt to configure setting in gopls.
-			return false;
-		default:
-			return true;
-	}
-}
+/**
+ * getFormatTool returns the formatter tool configured through the "go.formatTool"
+ * setting.
+ *
+ * If "go.formatTool" is set to "custom", it returns "customFormatter". User
+ * should specify "customFormatter" in setting "go.alternateTools".
+ *
+ * If "go.formatTool" is not set, it returns an empty string, indicating that
+ * no specific format tool is selected and gopls should be used.
+ */
+export function getFormatTool(goConfig: vscode.WorkspaceConfiguration): string {
+	const formatTool = goConfig.get<string>('formatTool');
 
-export function getFormatTool(goConfig: { [key: string]: any }): string {
-	const formatTool = goConfig['formatTool'];
-	if (formatTool === 'default') {
-		return 'goimports';
+	if (formatTool === undefined || formatTool === 'default') {
+		return ''; // not specified, yield to gopls by return empty string.
 	}
 	if (formatTool === 'custom') {
-		return resolvePath(goConfig['alternateTools']['customFormatter'] || 'goimports');
+		return 'customFormatter';
 	}
 	return formatTool;
 }

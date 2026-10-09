@@ -1,8 +1,9 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable node/no-unsupported-features/node-builtins */
 /* eslint-disable no-async-promise-executor */
-/* eslint-disable node/no-unpublished-import */
+/*---------------------------------------------------------
+ * Copyright 2026 The Go Authors. All rights reserved.
+ * Licensed under the MIT License. See LICENSE in the project root for license information.
+ *--------------------------------------------------------*/
+
 import assert from 'assert';
 import * as cp from 'child_process';
 import * as fs from 'fs';
@@ -27,7 +28,10 @@ import util = require('util');
 import { affectedByIssue832 } from './testutils';
 
 // For debugging test and streaming the trace instead of buffering, set this.
-const PRINT_TO_CONSOLE = false;
+const DEBUG = process.env['DEBUG'] === '1';
+function debugLog(msg: string) {
+	if (DEBUG) console.log(msg);
+}
 
 // Test suite adapted from:
 // https://github.com/microsoft/vscode-mock-debug/blob/master/src/tests/adapter.test.ts
@@ -80,7 +84,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 				console.log(`${ctx.currentTest?.title} FAILED: DAP Trace`);
 				d.printLog();
 			}
-			d.dispose();
+			void d.dispose();
 		} else {
 			if (ctx.currentTest?.state === 'failed' && dapTraced) {
 				console.log(`${ctx.currentTest?.title} FAILED: Debug Adapter Trace`);
@@ -97,7 +101,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 					console.log(`Failed to read trace: ${e}`);
 				}
 			}
-			dc?.stop();
+			void dc?.stop();
 		}
 		sinon.restore();
 	});
@@ -139,7 +143,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 			});
 
 			let started = false;
-			const timeoutToken: NodeJS.Timer = setTimeout(() => {
+			const timeoutToken: NodeJS.Timeout = setTimeout(() => {
 				console.log(`dlv debug server (PID: ${p.pid}) is not responding`);
 				reject(new Error('timed out while waiting for DAP server to start'));
 			}, 30_000);
@@ -190,7 +194,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 			new Promise<void>(async (resolve) => {
 				const debugConfigCopy = Object.assign({}, debugConfig);
 				delete debugConfigCopy.env;
-				console.log(`Setting up attach request for ${JSON.stringify(debugConfigCopy)}.`);
+				debugLog(`Setting up attach request for ${JSON.stringify(debugConfigCopy)}.`);
 				const attachResult = await dc.attachRequest(debugConfig as DebugProtocol.AttachRequestArguments);
 				assert.ok(attachResult.success);
 				resolve();
@@ -199,7 +203,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 		]);
 
 		if (breakpoints.length) {
-			console.log('Sending set breakpoints request for remote attach setup.');
+			debugLog('Sending set breakpoints request for remote attach setup.');
 			const breakpointsResult = await dc.setBreakpointsRequest({
 				source: { path: breakpoints[0].path },
 				breakpoints
@@ -210,7 +214,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 				assert.ok(breakpoint.verified);
 			});
 		}
-		console.log('Sending configuration done request for remote attach setup.');
+		debugLog('Sending configuration done request for remote attach setup.');
 		const configurationDoneResult = await dc.configurationDoneRequest();
 		assert.ok(configurationDoneResult.success);
 	}
@@ -233,7 +237,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 	 * output event with any of the provided strings is observed.
 	 */
 	async function waitForOutputMessage(dc: DebugClient, ...patterns: string[]): Promise<DebugProtocol.Event> {
-		return await new Promise<DebugProtocol.Event>((resolve, reject) => {
+		return await new Promise<DebugProtocol.Event>((resolve) => {
 			dc.on('output', (event) => {
 				for (const pattern of patterns) {
 					if (event.body.output.includes(pattern)) {
@@ -317,7 +321,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 					columnsStartAt1: true,
 					pathFormat: 'url'
 				});
-			} catch (err) {
+			} catch {
 				return; // want error
 			}
 			throw new Error("does not report error on invalid 'pathFormat' attribute");
@@ -346,7 +350,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 					value: { FOO: 'BAR' }
 				}
 			});
-			const configStub = sandbox.stub(extConfig, 'getGoConfig').returns(goConfig);
+			sandbox.stub(extConfig, 'getGoConfig').returns(goConfig);
 
 			const config = {
 				name: 'Launch',
@@ -373,7 +377,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 					value: { FOO: 'BAR' }
 				}
 			});
-			const configStub = sandbox.stub(extConfig, 'getGoConfig').returns(goConfig);
+			sandbox.stub(extConfig, 'getGoConfig').returns(goConfig);
 
 			const config = {
 				name: 'Launch',
@@ -496,12 +500,12 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 			await Promise.all([
 				dc.assertOutput('stderr', 'Error: unknown flag: --invalid\n', 5000),
 				dc.waitForEvent('terminated'),
-				dc.initializeRequest().then((response) => {
+				dc.initializeRequest().then(() => {
 					// The current debug adapter does not respond to launch request but,
 					// instead, sends error messages and TerminatedEvent as delve is closed.
 					// The promise from dc.launchRequest resolves when the launch response
 					// is received, so the promise will never get resolved.
-					dc.launchRequest(debugConfig as any);
+					void dc.launchRequest(debugConfig as any);
 				})
 			]);
 		});
@@ -561,7 +565,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 			const debugConfig = await initializeDebugConfig(config);
 			await Promise.all([
 				dc.configurationSequence().then(() => {
-					dc.threadsRequest().then((response) => {
+					void dc.threadsRequest().then((response) => {
 						assert.ok(response.success);
 					});
 				}),
@@ -706,7 +710,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 				noDebug: true
 			};
 			const debugConfig = await initializeDebugConfig(config);
-			dc.launch(debugConfig);
+			void dc.launch(debugConfig);
 			const event = await waitForHelloGoodbyeOutput(dc);
 			assert.strictEqual(event.body.output, 'Hello, World!\n');
 		});
@@ -724,7 +728,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 				noDebug: true
 			};
 			const debugConfig = await initializeDebugConfig(config);
-			dc.launch(debugConfig);
+			void dc.launch(debugConfig);
 			const event = await waitForHelloGoodbyeOutput(dc);
 			assert.strictEqual(event.body.output, 'Goodbye, World.\n');
 		});
@@ -743,7 +747,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 				noDebug: true
 			};
 			const debugConfig = await initializeDebugConfig(config);
-			dc.launch(debugConfig);
+			void dc.launch(debugConfig);
 			const event = await waitForHelloGoodbyeOutput(dc);
 			assert.strictEqual(event.body.output, 'Hello, World!\n');
 		});
@@ -760,7 +764,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 				noDebug: true
 			};
 			const debugConfig = await initializeDebugConfig(config);
-			dc.launch(debugConfig);
+			void dc.launch(debugConfig);
 			const event = await waitForHelloGoodbyeOutput(dc);
 			assert.strictEqual(event.body.output, 'Goodbye, World.\n');
 		});
@@ -781,7 +785,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 		});
 
 		teardown(async () => {
-			await dc.stop();
+			await dc?.stop();
 			await killProcessTree(childProcess);
 			// Wait 2 seconds for the process to be killed.
 			await new Promise((resolve) => setTimeout(resolve, 2_000));
@@ -820,9 +824,11 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 		});
 	});
 
-	// The file paths returned from delve use '/' not the native path
-	// separator, so we can replace any instances of '\' with '/', which
-	// allows the hitBreakpoint check to match.
+	/**
+	 * The file paths returned from delve use '/' not the native path separator,
+	 * so we can replace any instances of '\' with '/', which allows the
+	 * hitBreakpoint check to match.
+	 */
 	const getBreakpointLocation = (FILE: string, LINE: number) => {
 		return { path: FILE.replace(/\\/g, '/'), line: LINE };
 	};
@@ -1380,8 +1386,8 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 
 			await Promise.all([
 				new Promise<void>((resolve) => {
-					dc.disconnectRequest({ restart: false });
-					dc.disconnectRequest({ restart: false });
+					void dc.disconnectRequest({ restart: false });
+					void dc.disconnectRequest({ restart: false });
 					resolve();
 				}),
 				dc.waitForEvent('terminated')
@@ -2031,7 +2037,10 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 			dapTraced = true;
 
 			// Log the output for easier test debugging.
-			config['logOutput'] = isDlvDap ? 'dap,debugger' : 'rpc,debugger';
+			//
+			// Disable "rpc" logging in "legacy" mode to prevent vscode-go test
+			// timeouts caused by oversized stacktrace outputs.
+			config['logOutput'] = isDlvDap ? 'dap,debugger' : 'debugger';
 			config['showLog'] = true;
 			config['trace'] = 'verbose';
 		}
@@ -2048,6 +2057,7 @@ const testAll = (ctx: Mocha.Context, isDlvDap: boolean, withConsole?: string) =>
 		// second test has a chance to run it.
 		if (!config['output'] && ['debug', 'auto', 'test'].includes(config['mode'])) {
 			const dir = parseDebugProgramArgSync(config['program']).dirname;
+			if (!dir) throw new Error('Debug configuration does not define an output directory');
 			config['output'] = path.join(dir, `__debug_bin_${testNumber}`);
 		}
 		testNumber++;
@@ -2099,21 +2109,10 @@ class DelveDAPDebugAdapterOnSocket extends proxy.DelveDAPOutputAdapter {
 	}
 
 	private constructor(config: DebugConfiguration) {
-		const logger = {
-			trace: (msg: string) => {
-				console.log(msg);
-			},
-			debug: (msg: string) => {
-				console.log(msg);
-			},
-			info: (msg: string) => {
-				console.log(msg);
-			},
-			error: (msg: string) => {
-				console.error(msg);
-			}
+		const log = (msg: string) => {
+			debugLog(msg);
 		};
-		super(config, logger);
+		super(config, { trace: log, debug: log, info: log, error: log });
 	}
 
 	private static TWO_CRLF = '\r\n\r\n';
@@ -2130,7 +2129,7 @@ class DelveDAPDebugAdapterOnSocket extends proxy.DelveDAPOutputAdapter {
 				this.log('>> accepted connection from client');
 				c.on('end', () => {
 					this.log('>> client disconnected');
-					this.dispose();
+					void this.dispose();
 				});
 				this.run(c, c);
 			});
@@ -2198,7 +2197,7 @@ class DelveDAPDebugAdapterOnSocket extends proxy.DelveDAPOutputAdapter {
 		}
 
 		this.log(`-> server: ${JSON.stringify(resp)}`);
-		this.handleMessage(resp);
+		void this.handleMessage(resp);
 
 		return true;
 	}
@@ -2237,7 +2236,6 @@ class DelveDAPDebugAdapterOnSocket extends proxy.DelveDAPOutputAdapter {
 	private _handleData(data: Buffer): void {
 		this._rawData = Buffer.concat([this._rawData!, data]);
 
-		// eslint-disable-next-line no-constant-condition
 		while (true) {
 			if (this._contentLength! >= 0) {
 				if (this._rawData.length >= this._contentLength!) {
@@ -2248,7 +2246,7 @@ class DelveDAPDebugAdapterOnSocket extends proxy.DelveDAPOutputAdapter {
 						try {
 							this.log(`-> server: ${message}`);
 							const msg: DebugProtocol.ProtocolMessage = JSON.parse(message);
-							this.handleMessage(msg);
+							void this.handleMessage(msg);
 						} catch (e) {
 							throw new Error('Error handling data: ' + (e && (e as Error).message));
 						}
@@ -2277,7 +2275,7 @@ class DelveDAPDebugAdapterOnSocket extends proxy.DelveDAPOutputAdapter {
 	private _log = [] as string[];
 	private log(msg: string) {
 		this._log.push(msg);
-		if (PRINT_TO_CONSOLE) {
+		if (DEBUG) {
 			console.log(msg);
 		}
 	}

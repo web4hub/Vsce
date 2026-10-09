@@ -212,10 +212,10 @@ The extension organizes imports automatically and can add missing imports if the
 
 #### Custom formatter
 
-In addition to the default [`go fmt`](https://pkg.go.dev/cmd/gofmt) style formatter, the language server (`gopls`) supports `github.com/mvdan/gofumpt` style formmating. Use gopls's [`formatting.gofumpt`](settings.md#formattinggofumpt) setting:
+In addition to the default [`go fmt`](https://pkg.go.dev/cmd/gofmt) style formatter, the language server (`gopls`) supports `github.com/mvdan/gofumpt` style formatting. Use gopls's [`formatting.gofumpt`](settings.md#formattinggofumpt) setting:
 
 ```json
-"gopls": { "fomatting.gofumpt": true }
+"gopls": { "formatting.gofumpt": true }
 ```
 
 You can  also configure to use other custom formatter (`golines`) by using the `"go.formatTool"` setting. The custom formatter must operate on file contents from STDIN, and output the formatted result to STDOUT.
@@ -253,13 +253,17 @@ For known issues with this feature see [golang/go#37170](https://github.com/gola
 
 ### Add or remove struct tags
 
-Use the [`Go: Add Tags to Struct Fields`](commands.md#go-add-tags-to-struct-fields) command to automatically generate or remove [tags](https://pkg.go.dev/reflect?tab=doc#StructTag) for your struct. This feature is provided by the [`gomodifytags`](tools.md#gomodifytags) tool.
+Use the [`Go: Add Tags to Struct Fields`](commands.md#go-add-tags-to-struct-fields) command to automatically generate or remove [tags](https://pkg.go.dev/reflect?tab=doc#StructTag) for your struct. This feature is provided by the [`gomodifytags`](https://pkg.go.dev/github.com/fatih/gomodifytags) tool invoked via gopls.
 
 <div style="text-align: center;"><img src="images/addtagstostructfields.gif" alt="Add tags to struct fields" style="width: 75%"> </div>
 
 ### Generate interface implementation
 
-Use the [`Go: Generate Interface Stubs`](commands.md#go-generate-interface-stubs) command to automatically generate method stubs for a given interface. This feature is provided by the [`impl`](tools.md#impl) tool.
+Use the [`Go: Generate Interface Stubs`](commands.md#go-generate-interface-stubs) command to automatically generate method stubs for a given interface. With the cursor inside a type declaration (e.g. `type Foo struct`), running this command triggers an interactive prompt provided by `gopls` to select the interface, and inserts the method stubs after the type declaration.
+
+<!-- TODO(hxjiang): remove the paragraph below once fully deprecated -->
+
+Alternatively, use the [`Go: Generate Interface Stubs (legacy)`](commands.md#go-generate-interface-stubs-legacy) command provided by the [`impl`](tools.md#impl) tool to prompt for the receiver and interface, inserting the method stubs directly at the cursor location.
 
 <div style="text-align: center;"><img src="images/generateinterfaceimplementation.gif" alt="Generate functions to implement an interface" style="width: 75%"> </div>
 

@@ -69,8 +69,7 @@ class TestRunOutput implements OutputChannel {
 	}
 
 	clear() {}
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	show(...args: unknown[]) {}
+	show() {}
 	hide() {}
 	dispose() {}
 	replace() {}
@@ -247,7 +246,9 @@ export class GoTestRunner {
 		// Save all documents that contain a test we're about to run, to ensure `go
 		// test` has the latest changes
 		const fileUris = new Set(Array.from(files).map((x) => x.uri));
-		await Promise.all(this.workspace.textDocuments.filter((x) => fileUris.has(x.uri)).map((x) => x.save()));
+		await Promise.all(
+			this.workspace.textDocuments.filter((x) => fileUris.has(x.uri) && x.isDirty).map((x) => x.save())
+		);
 
 		let hasBench = false,
 			hasNonBench = false;
@@ -342,7 +343,7 @@ export class GoTestRunner {
 				);
 				Object.keys(tests)
 					.concat(Object.keys(benchmarks))
-					.forEach((x) => outputChannel.appendLine(x));
+					.forEach((x) => outputChannel.info(x));
 				outputChannel.show();
 				vscode.window.showErrorMessage(
 					`Cannot run the selected tests in package ${pkg.label} - see the Go output panel for details`

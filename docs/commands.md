@@ -23,6 +23,10 @@ Finally, you can also see a full list by using a meta command: `Go: Show All Com
 
 <!-- Everything below this line is generated. DO NOT EDIT. -->
 
+### `Go: Open in new Document`
+
+Open selected variable in a new document.
+
 ### `Go: Current GOPATH`
 
 See the currently set GOPATH.
@@ -34,6 +38,14 @@ See the currently set GOROOT.
 ### `Go: Locate Configured Go Tools`
 
 List all the Go tools being used by this extension along with their locations.
+
+### `Package Outline: Sort By Name`
+
+Sort Package Outline symbols alphabetically.
+
+### `Package Outline: Sort By Position`
+
+Sort Package Outline symbols by source position.
 
 ### `Go: Test Function At Cursor`
 
@@ -117,19 +129,27 @@ Displays test coverage in the current package.
 
 ### `Go: Generate Unit Tests For Package`
 
-Generates unit tests for the current package
+Generates unit tests for the current package using gotests
 
 ### `Go: Generate Unit Tests For File`
 
-Generates unit tests for the current file
+Generates unit tests for the current file using gotests
 
 ### `Go: Generate Unit Tests For Function`
 
-Generates unit tests for the selected function in the current file
+Generates unit tests for the selected function in the current file using gopls
+
+### `Go: Generate Unit Tests For Function (legacy)`
+
+Generates unit tests for the selected function in the current file using gotests
 
 ### `Go: Generate Interface Stubs`
 
-Generates method stub for implementing the provided interface and inserts at the cursor.
+Generates method stub for implementing the provided interface for the type at the cursor using gopls.
+
+### `Go: Generate Interface Stubs (legacy)`
+
+Generates method stub for implementing the provided interface and inserts at the cursor using impl.
 
 ### `Go: Extract Language Server Logs To Editor`
 
@@ -139,9 +159,9 @@ Extract logs in the `gopls (server)` output channel to the editor.
 
 Open the welcome page for the Go extension.
 
-### `Go: Toggle gc details`
+### `Go: Toggle compiler optimization details`
 
-Toggle the display of compiler optimization choices
+Toggle the per-package flag that causes compiler optimization details to be reported as diagnostics
 
 ### `Go: Add Import`
 
@@ -169,11 +189,11 @@ Start the Go language server's maintainer interface (a web server).
 
 ### `Go: Add Tags To Struct Fields`
 
-Add tags configured in go.addTags setting to selected struct using gomodifytags
+Add tags configured in go.addTags setting to selected struct using gomodifytags (via gopls)
 
 ### `Go: Remove Tags From Struct Fields`
 
-Remove tags configured in go.removeTags setting from selected struct using gomodifytags
+Remove tags configured in go.removeTags setting from selected struct using gomodifytags (via gopls)
 
 ### `Go: Show All Commands...`
 

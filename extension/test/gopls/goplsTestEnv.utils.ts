@@ -1,4 +1,3 @@
-/* eslint-disable node/no-unpublished-import */
 /*---------------------------------------------------------
  * Copyright 2023 The Go Authors. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -8,11 +7,11 @@ import { EventEmitter } from 'events';
 import * as path from 'path';
 import sinon = require('sinon');
 import * as vscode from 'vscode';
-import { LanguageClient } from 'vscode-languageclient/node';
 import { getGoConfig } from '../../src/config';
 import {
 	buildLanguageClient,
-	BuildLanguageClientOption,
+	GoLanguageClient,
+	LanguageServerConfig,
 	buildLanguageServerConfig,
 	toServerInfo
 } from '../../src/language/goLanguageServer';
@@ -21,8 +20,13 @@ import { GoExtensionContext } from '../../src/context';
 // FakeOutputChannel is a fake output channel used to buffer
 // the output of the tested language client in an in-memory
 // string array until cleared.
-export class FakeOutputChannel implements vscode.OutputChannel {
+export class FakeOutputChannel implements vscode.LogOutputChannel {
 	public name = 'FakeOutputChannel';
+
+	// Satisfies vscode.LogOutputChannel interface.
+	public logLevel = vscode.LogLevel.Info;
+	public onDidChangeLogLevel = new vscode.EventEmitter<vscode.LogLevel>().event;
+
 	public show = sinon.fake(); // no-empty
 	public hide = sinon.fake(); // no-empty
 	public dispose = sinon.fake(); // no-empty
@@ -42,6 +46,11 @@ export class FakeOutputChannel implements vscode.OutputChannel {
 
 	public append = (v: string) => this.enqueue(v);
 	public appendLine = (v: string) => this.enqueue(v);
+	public error = (...args: any[]) => this.enqueue(args.join(' '));
+	public warn = (...args: any[]) => this.enqueue(args.join(' '));
+	public info = (...args: any[]) => this.enqueue(args.join(' '));
+	public debug = (...args: any[]) => this.enqueue(args.join(' '));
+	public trace = (...args: any[]) => this.enqueue(args.join(' '));
 	public clear = () => {
 		this.buf = [];
 	};
@@ -65,11 +74,10 @@ export class FakeOutputChannel implements vscode.OutputChannel {
 // Env is a collection of test-related variables and lsp client.
 // Currently, this works only in module-aware mode.
 export class Env {
-	public languageClient?: LanguageClient;
+	public languageClient?: GoLanguageClient;
 	public goCtx: GoExtensionContext = {};
 
 	private fakeOutputChannel?: FakeOutputChannel;
-	private disposables = [] as { dispose(): void }[];
 
 	public flushTrace(print: boolean) {
 		if (print) {
@@ -108,14 +116,16 @@ export class Env {
 		if (!goConfig) {
 			goConfig = getGoConfig();
 		}
-		const cfg: BuildLanguageClientOption = await buildLanguageServerConfig(
+		const cfg: LanguageServerConfig = await buildLanguageServerConfig(
 			Object.create(goConfig, {
 				useLanguageServer: { value: true },
 				languageServerFlags: { value: ['-rpc.trace'] } // enable rpc tracing to monitor progress reports
 			})
 		);
-		cfg.outputChannel = this.fakeOutputChannel; // inject our fake output channel.
 		this.goCtx.latestConfig = cfg;
+		// Inject fake output channel.
+		this.goCtx.serverOutputChannel = this.fakeOutputChannel;
+		this.goCtx.serverTraceChannel = this.fakeOutputChannel;
 		this.languageClient = await buildLanguageClient(this.goCtx, cfg);
 		if (!this.languageClient) {
 			throw new Error('Language client not initialized.');
@@ -143,17 +153,12 @@ export class Env {
 	public async teardown() {
 		try {
 			await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-			await this.languageClient?.stop(1000); // 1s timeout
+			await this.languageClient?.stop(10000); // 10s timeout
 		} catch (e) {
-			console.log(`failed to stop gopls within 1sec: ${e}`);
+			console.log(`failed to stop gopls within 10sec: ${e}`);
+			this.flushTrace(true);
 		} finally {
-			if (this.languageClient?.isRunning()) {
-				console.log(`failed to stop language client on time: ${this.languageClient?.state}`);
-				this.flushTrace(true);
-			}
-			for (const d of this.disposables) {
-				d.dispose();
-			}
+			void this.languageClient?.dispose();
 			this.languageClient = undefined;
 			this.goCtx = {};
 		}

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable no-async-promise-executor */
 /*---------------------------------------------------------
  * Copyright 2021 The Go Authors. All rights reserved.
@@ -11,7 +10,7 @@ import { getBinPath } from './util';
 import { lsofDarwinCommand, parseLsofProcesses } from './utils/lsofProcessParser';
 import { getEnvPath, getCurrentGoRoot } from './utils/pathUtils';
 import { parsePsProcesses, psDarwinCommand, psLinuxCommand } from './utils/psProcessParser';
-import { parseWmicProcesses, wmicCommand } from './utils/wmicProcessParser';
+import { getWindowsProcesses } from './utils/windowsProcessParser';
 import vscode = require('vscode');
 
 export async function pickProcess(): Promise<string> {
@@ -133,7 +132,7 @@ async function getGoProcesses(): Promise<AttachItem[]> {
 
 export function parseGoVersionOutput(stdout: string): string[] {
 	const goProcessExes: string[] = [];
-	const goVersionRegexp = /: go\d+\.\d+(\.\d+)?$/;
+	const goVersionRegexp = /: go\d+\.\d+(\.\d+)?.*$/;
 
 	const lines = stdout.toString().split('\n');
 	lines.forEach((line) => {
@@ -174,33 +173,29 @@ export function mergeExecutableAttachItem(processes: AttachItem[], addlAttachIte
 }
 
 async function getAllProcesses(): Promise<AttachItem[]> {
-	let processCmd: ProcessListCommand;
 	switch (process.platform) {
 		case 'win32':
-			processCmd = wmicCommand;
-			break;
-		case 'darwin':
-			processCmd = psDarwinCommand;
-			break;
-		case 'linux':
-			processCmd = psLinuxCommand;
-			break;
+			return await getWindowsProcesses();
+		case 'darwin': {
+			const { stdout } = await runCommand(psDarwinCommand);
+			return parsePsProcesses(stdout);
+		}
+		case 'linux': {
+			const { stdout } = await runCommand(psLinuxCommand);
+			return parsePsProcesses(stdout);
+		}
 		default:
 			// Other operating systems are not supported.
 			throw new Error(
 				`'pickProcess' and 'pickGoProcess' are not supported for ${process.platform}. Set process id in launch.json instead.`
 			);
 	}
-
-	const { stdout } = await runCommand(processCmd);
-
-	return process.platform === 'win32' ? parseWmicProcesses(stdout) : parsePsProcesses(stdout);
 }
 
 async function runCommand(
 	processCmd: ProcessListCommand
-): Promise<{ err: cp.ExecException | null; stdout: string; stderr: string }> {
-	return await new Promise<{ err: cp.ExecException | null; stdout: string; stderr: string }>((resolve) => {
+): Promise<{ err: cp.ExecFileException | null; stdout: string; stderr: string }> {
+	return await new Promise<{ err: cp.ExecFileException | null; stdout: string; stderr: string }>((resolve) => {
 		cp.execFile(processCmd.command, processCmd.args, (err, stdout, stderr) => {
 			resolve({ err, stdout, stderr });
 		});

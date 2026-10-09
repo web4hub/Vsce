@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright 2021 The Go Authors. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -200,7 +199,6 @@ export class ProxyDebugAdapter implements vscode.DebugAdapter {
 	private handleDataFromServer(data: Buffer): void {
 		this.rawData = Buffer.concat([this.rawData, data]);
 
-		// eslint-disable-next-line no-constant-condition
 		while (true) {
 			if (this.contentLength >= 0) {
 				if (this.rawData.length >= this.contentLength) {
@@ -237,7 +235,10 @@ export class ProxyDebugAdapter implements vscode.DebugAdapter {
 // VSCode and a dlv dap process spawned and managed by this adapter.
 // It turns the process's stdout/stderrr into OutputEvent.
 export class DelveDAPOutputAdapter extends ProxyDebugAdapter {
-	constructor(private configuration: vscode.DebugConfiguration, logger: ILogger) {
+	constructor(
+		private configuration: vscode.DebugConfiguration,
+		logger: ILogger
+	) {
 		super(logger);
 	}
 
@@ -346,7 +347,7 @@ export class DelveDAPOutputAdapter extends ProxyDebugAdapter {
 
 			this.dlvDapServer = dlvDapServer;
 			this.socket = socket;
-			this.start(this.socket, this.socket);
+			void this.start(this.socket, this.socket);
 		} catch (err) {
 			return { connected: false, reason: err };
 		}
@@ -550,7 +551,7 @@ function spawnDlvDapServerProcess(
 			stdio: onWindows ? ['pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe', 'pipe'] // --log-dest=3 if !onWindows.
 		});
 		let started = false;
-		const timeoutToken: NodeJS.Timer = setTimeout(() => {
+		const timeoutToken: NodeJS.Timeout = setTimeout(() => {
 			logConsole(`Delve DAP server (PID: ${p.pid}) is not responding`);
 			reject(new Error('timed out while waiting for DAP server to start'));
 		}, 30_000);
@@ -663,10 +664,7 @@ function getSpawnConfig(launchAttachArgs: vscode.DebugConfiguration, logErr: (ms
 
 // toggleHideSystemGoroutineCustomRequest is a helper function extracted
 // for testing the command.
-export async function toggleHideSystemGoroutinesCustomRequest(
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	cr: (command: string, args?: any) => Thenable<any>
-) {
+export async function toggleHideSystemGoroutinesCustomRequest(cr: (command: string, args?: any) => Thenable<any>) {
 	const debugConsole = vscode.debug.activeDebugConsole;
 	try {
 		const response = await cr('evaluate', {
@@ -693,7 +691,7 @@ export async function toggleHideSystemGoroutinesCustomRequest(
 const toggleHideSystemGoroutines = () => {
 	const ds = vscode.debug.activeDebugSession;
 	if (ds) {
-		toggleHideSystemGoroutinesCustomRequest((command, args) => {
+		void toggleHideSystemGoroutinesCustomRequest((command, args) => {
 			return ds.customRequest(command, args);
 		});
 	}

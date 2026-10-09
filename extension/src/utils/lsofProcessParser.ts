@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /*---------------------------------------------------------
  * Copyright 2021 The Go Authors. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -25,7 +24,7 @@ export function parseLsofProcesses(processes: string): AttachItem[] {
 	return parseProcessesFromLsofArray(lines);
 }
 
-function parseProcessesFromLsofArray(processArray: string[], includesEnv?: boolean): AttachItem[] {
+function parseProcessesFromLsofArray(processArray: string[]): AttachItem[] {
 	const processEntries: AttachItem[] = [];
 	let i = 0;
 	while (i < processArray.length) {

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -33,7 +32,7 @@ export function getGlobalState() {
 }
 
 export const resetGlobalState: CommandFactory = () => () => {
-	resetStateQuickPick(globalState, updateGlobalState);
+	void resetStateQuickPick(globalState, updateGlobalState);
 };
 
 export function getFromWorkspaceState(key: string, defaultValue?: any) {
@@ -59,7 +58,7 @@ export function getWorkspaceState(): vscode.Memento {
 }
 
 export const resetWorkspaceState: CommandFactory = () => () => {
-	resetStateQuickPick(workspaceState, updateWorkspaceState);
+	void resetStateQuickPick(workspaceState, updateWorkspaceState);
 };
 
 export function getMementoKeys(state: vscode.Memento): string[] {

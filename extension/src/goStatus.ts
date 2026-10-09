@@ -1,4 +1,3 @@
-/* eslint-disable no-case-declarations */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Modification copyright 2020 The Go Authors. All rights reserved.
@@ -112,7 +111,7 @@ export const expandGoStatusBar: CommandFactory = (ctx, goCtx) => async () => {
 					}
 					break;
 				case 'Install Go Language Server':
-					vscode.commands.executeCommand('go.tools.install', [allToolsInformation['gopls']]);
+					vscode.commands.executeCommand('go.tools.install', [allToolsInformation.get('gopls')!]);
 					break;
 				case "Open 'go.work'":
 				case "Open 'go.mod'":

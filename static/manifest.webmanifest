@@ -1,0 +1,21 @@
+{
+  "short_name": "GoPWA",
+  "name": "Go Progressive Web Application",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#00add8",
+  "display": "standalone",
+  "orientation": "portrait"
+}

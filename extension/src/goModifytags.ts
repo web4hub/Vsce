@@ -1,5 +1,3 @@
-/* eslint-disable no-prototype-builtins */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -7,189 +5,106 @@
 
 'use strict';
 
-import cp = require('child_process');
 import vscode = require('vscode');
 import { CommandFactory } from './commands';
 import { getGoConfig } from './config';
-import { toolExecutionEnvironment } from './goEnv';
-import { promptForMissingTool, promptForUpdatingTool } from './goInstallTools';
-import { byteOffsetAt, getBinPath, getFileArchive } from './util';
+import { TelemetryKey, telemetryReporter } from './goTelemetry';
 
-// Interface for the output from gomodifytags
-interface GomodifytagsOutput {
-	start: number;
-	end: number;
-	lines: string[];
+export const GOPLS_MODIFY_TAGS_COMMAND = 'gopls.modify_tags';
+
+// Interface for the arguments passed to gopls.modify_tags command. URI and range
+// are required parameters collected by the extension based on the open editor,
+// and the rest of the args are collected from user settings. gopls prompts the
+// user for the tags if neither the tags nor the options are specified.
+interface GoModifyTagsArgs {
+	URI: string;
+	range: vscode.Range;
+	modification?: 'add' | 'remove';
+	add?: string;
+	addOptions?: string;
+	remove?: string;
+	removeOptions?: string;
+	transform?: string;
+	valueFormat?: string;
 }
 
 // Interface for settings configuration for adding and removing tags
 interface GoTagsConfig {
-	[key: string]: any;
-	tags: string;
-	options: string;
-	promptForTags: boolean;
-	template: string;
+	tags?: string;
+	options?: string;
+	promptForTags?: boolean;
+	transform?: string;
+	template?: string;
 }
 
-export const addTags: CommandFactory = () => (commandArgs: GoTagsConfig) => {
+export const addTags: CommandFactory = () => async (uri: vscode.Uri) => {
+	if (uri) {
+		telemetryReporter.add(TelemetryKey.COMMAND_TRIGGER_GOPLS_MODIFY_TAGS_CONTEXT_MENU, 1);
+	} else {
+		telemetryReporter.add(TelemetryKey.COMMAND_TRIGGER_GOPLS_MODIFY_TAGS_COMMAND_PALETTE, 1);
+	}
+
 	const args = getCommonArgs();
 	if (!args) {
 		return;
 	}
 
-	getTagsAndOptions(<GoTagsConfig>getGoConfig()['addTags'], commandArgs).then(
-		([tags, options, transformValue, template]) => {
-			if (!tags && !options) {
-				return;
-			}
-			if (tags) {
-				args.push('--add-tags');
-				args.push(tags);
-			}
-			if (options) {
-				args.push('--add-options');
-				args.push(options);
-			}
-			if (transformValue) {
-				args.push('--transform');
-				args.push(transformValue);
-			}
-			if (template) {
-				args.push('--template');
-				args.push(template);
-			}
-			runGomodifytags(args);
-		}
-	);
+	// Introduced since gopls v0.23.0, but older gopls will ignore this field.
+	args.modification = 'add';
+
+	// If promptForTags is set, ignore the settings so that gopls prompts the
+	// user. Otherwise, pass the settings along; gopls prompts only if neither
+	// tags nor options are set.
+	const config = getGoConfig().get<GoTagsConfig>('addTags');
+	if (!config?.promptForTags) {
+		args.add = config?.tags;
+		args.addOptions = config?.options;
+		args.transform = config?.transform;
+		args.valueFormat = config?.template;
+	}
+	await vscode.commands.executeCommand(GOPLS_MODIFY_TAGS_COMMAND, args);
 };
 
-export const removeTags: CommandFactory = () => (commandArgs: GoTagsConfig) => {
+export const removeTags: CommandFactory = () => async (uri: vscode.Uri) => {
+	if (uri) {
+		telemetryReporter.add(TelemetryKey.COMMAND_TRIGGER_GOPLS_MODIFY_TAGS_CONTEXT_MENU, 1);
+	} else {
+		telemetryReporter.add(TelemetryKey.COMMAND_TRIGGER_GOPLS_MODIFY_TAGS_COMMAND_PALETTE, 1);
+	}
+
 	const args = getCommonArgs();
 	if (!args) {
 		return;
 	}
 
-	getTagsAndOptions(<GoTagsConfig>getGoConfig()['removeTags'], commandArgs).then(([tags, options]) => {
-		if (!tags && !options) {
-			args.push('--clear-tags');
-			args.push('--clear-options');
-		}
-		if (tags) {
-			args.push('--remove-tags');
-			args.push(tags);
-		}
-		if (options) {
-			args.push('--remove-options');
-			args.push(options);
-		}
-		runGomodifytags(args);
-	});
+	// Introduced since gopls v0.23.0, but older gopls will ignore this field.
+	args.modification = 'remove';
+
+	// If promptForTags is set, ignore the settings so that gopls prompts the
+	// user. Otherwise, pass the settings along; gopls prompts only if neither
+	// tags nor options are set.
+	const config = getGoConfig().get<GoTagsConfig>('removeTags');
+	if (!config?.promptForTags) {
+		args.remove = config?.tags;
+		args.removeOptions = config?.options;
+	}
+	await vscode.commands.executeCommand(GOPLS_MODIFY_TAGS_COMMAND, args);
 };
 
-function getCommonArgs(): string[] {
+// getCommonArgs produces the args used for calling the gopls.modify_tags command.
+function getCommonArgs(): GoModifyTagsArgs | undefined {
 	const editor = vscode.window.activeTextEditor;
 	if (!editor) {
 		vscode.window.showInformationMessage('No editor is active.');
-		return [];
+		return undefined;
 	}
 	if (!editor.document.fileName.endsWith('.go')) {
 		vscode.window.showInformationMessage('Current file is not a Go file.');
-		return [];
+		return undefined;
 	}
-	const args = ['-modified', '-file', editor.document.fileName, '-format', 'json'];
-	if (
-		editor.selection.start.line === editor.selection.end.line &&
-		editor.selection.start.character === editor.selection.end.character
-	) {
-		// Add tags to the whole struct
-		const offset = byteOffsetAt(editor.document, editor.selection.start);
-		args.push('-offset');
-		args.push(offset.toString());
-	} else if (editor.selection.start.line <= editor.selection.end.line) {
-		// Add tags to selected lines
-		args.push('-line');
-		args.push(`${editor.selection.start.line + 1},${editor.selection.end.line + 1}`);
-	}
-
+	const args: GoModifyTagsArgs = {
+		URI: editor.document.uri.toString(),
+		range: editor.selection
+	};
 	return args;
-}
-
-function getTagsAndOptions(config: GoTagsConfig, commandArgs: GoTagsConfig): Thenable<(string | undefined)[]> {
-	const tags = commandArgs && commandArgs.hasOwnProperty('tags') ? commandArgs['tags'] : config['tags'];
-	const options = commandArgs && commandArgs.hasOwnProperty('options') ? commandArgs['options'] : config['options'];
-	const promptForTags =
-		commandArgs && commandArgs.hasOwnProperty('promptForTags')
-			? commandArgs['promptForTags']
-			: config['promptForTags'];
-	const transformValue: string =
-		commandArgs && commandArgs.hasOwnProperty('transform') ? commandArgs['transform'] : config['transform'];
-	const format: string =
-		commandArgs && commandArgs.hasOwnProperty('template') ? commandArgs['template'] : config['template'];
-
-	if (!promptForTags) {
-		return Promise.resolve([tags, options, transformValue, format]);
-	}
-
-	return vscode.window
-		.showInputBox({
-			value: tags,
-			prompt: 'Enter comma separated tag names'
-		})
-		.then((inputTags) => {
-			return vscode.window
-				.showInputBox({
-					value: options,
-					prompt: 'Enter comma separated options'
-				})
-				.then((inputOptions) => {
-					return vscode.window
-						.showInputBox({
-							value: transformValue,
-							prompt: 'Enter transform value'
-						})
-						.then((transformOption) => {
-							return vscode.window
-								.showInputBox({
-									value: format,
-									prompt: 'Enter template value'
-								})
-								.then((template) => {
-									return [inputTags, inputOptions, transformOption, template];
-								});
-						});
-				});
-		});
-}
-
-function runGomodifytags(args: string[]) {
-	const gomodifytags = getBinPath('gomodifytags');
-	const editor = vscode.window.activeTextEditor;
-	if (!editor) {
-		return;
-	}
-	const input = getFileArchive(editor.document);
-	const p = cp.execFile(gomodifytags, args, { env: toolExecutionEnvironment() }, (err, stdout, stderr) => {
-		if (err && (<any>err).code === 'ENOENT') {
-			promptForMissingTool('gomodifytags');
-			return;
-		}
-		if (err && (<any>err).code === 2 && args.indexOf('--template') > 0) {
-			vscode.window.showInformationMessage(
-				'Cannot modify tags: you might be using a' + 'version that does not support --template'
-			);
-			promptForUpdatingTool('gomodifytags');
-			return;
-		}
-		if (err) {
-			vscode.window.showInformationMessage(`Cannot modify tags: ${stderr}`);
-			return;
-		}
-		const output = <GomodifytagsOutput>JSON.parse(stdout);
-		editor.edit((editBuilder) => {
-			editBuilder.replace(new vscode.Range(output.start - 1, 0, output.end, 0), output.lines.join('\n') + '\n');
-		});
-	});
-	if (p.pid) {
-		p.stdin?.end(input);
-	}
 }

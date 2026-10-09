@@ -11,6 +11,10 @@ import { Env } from './goplsTestEnv.utils';
 import { updateGoVarsFromConfig } from '../../src/goInstallTools';
 
 suite('Go Test Runner', () => {
+	// updateGoVarsFromConfig mutates process.env. Restore the cached
+	// prevEnv when teardown.
+	// TODO: avoid updateGoVarsFromConfig call.
+	const prevEnv = Object.assign({}, process.env);
 	const fixtureDir = path.join(__dirname, '..', '..', '..', 'test', 'testdata');
 
 	let testExplorer: GoTestExplorer;
@@ -18,11 +22,15 @@ suite('Go Test Runner', () => {
 	suiteSetup(async () => {
 		await updateGoVarsFromConfig({});
 	});
+	suiteTeardown(() => {
+		process.env = prevEnv;
+	});
 
 	suite('parseOutput', () => {
 		const ctx = MockExtensionContext.new();
 		suiteSetup(async () => {
-			testExplorer = GoTestExplorer.setup(ctx, {});
+			testExplorer = GoTestExplorer.new(ctx, {});
+			ctx.subscriptions.push(testExplorer);
 		});
 		suiteTeardown(() => ctx.teardown());
 
@@ -57,23 +65,22 @@ suite('Go Test Runner', () => {
 			testParseOutput('file.go:1: line1 . file.go:2: line2 \n', [{ file: filePath, line: 1, msg: 'line2 \n' }]));
 	});
 
-	suite('Profile', function () {
+	suite('Profile', () => {
 		const sandbox = sinon.createSandbox();
 		const ctx = MockExtensionContext.new();
 		const env = new Env();
 
-		let uri: Uri;
 		let stub: sinon.SinonStub<[testUtils.TestConfig], Promise<boolean>>;
 
 		suiteSetup(async () => {
-			uri = Uri.file(path.join(fixtureDir, 'codelens', 'codelens2_test.go'));
-			await env.startGopls(uri.fsPath);
-			testExplorer = GoTestExplorer.setup(ctx, env.goCtx);
+			const profileDir = path.join(fixtureDir, 'codelens', 'testnames');
+			const uri = Uri.file(path.join(profileDir, 'testnames_test.go'));
+			await env.startGopls(uri.fsPath, undefined, profileDir);
+			testExplorer = GoTestExplorer.new(ctx, env.goCtx);
+			ctx.subscriptions.push(testExplorer);
 
 			await forceDidOpenTextDocument(workspace, testExplorer, uri);
-		});
 
-		setup(() => {
 			stub = sandbox.stub(testUtils, 'goTest');
 			stub.callsFake((cfg) => {
 				const send = cfg.goTestOutputConsumer;
@@ -85,18 +92,22 @@ suite('Go Test Runner', () => {
 			});
 		});
 
-		teardown(() => {
+		suiteTeardown(async () => {
+			await env.teardown();
+			ctx.teardown();
 			sandbox.restore();
 		});
 
-		// suiteTeardown
-		this.afterEach(async function () {
-			await env.teardown();
+		setup(() => {
+			// Clear counts and history between each test.
+			stub.resetHistory();
+		});
+
+		teardown(async function () {
 			// Note: this shouldn't use () => {...}. Arrow functions do not have 'this'.
 			// I don't know why but this.currentTest.state does not have the expected value when
 			// used with teardown.
 			env.flushTrace(this.currentTest?.state === 'failed');
-			ctx.teardown();
 		});
 
 		test('creates a profile', async () => {
@@ -108,7 +119,8 @@ suite('Go Test Runner', () => {
 					{
 						include: [test],
 						exclude: undefined,
-						profile: undefined
+						profile: undefined,
+						preserveFocus: false
 					},
 					undefined,
 					{ kind: 'cpu' }
@@ -128,7 +140,8 @@ suite('Go Test Runner', () => {
 				await testExplorer.runner.run({
 					include: tests,
 					exclude: undefined,
-					profile: undefined
+					profile: undefined,
+					preserveFocus: false
 				}),
 				'Failed to execute `go test`'
 			);
@@ -150,7 +163,8 @@ suite('Go Test Runner', () => {
 					{
 						include: tests,
 						exclude: undefined,
-						profile: undefined
+						profile: undefined,
+						preserveFocus: false
 					},
 					undefined,
 					{ kind: 'cpu' }
@@ -170,10 +184,13 @@ suite('Go Test Runner', () => {
 	});
 
 	suite('Subtest', function () {
+		// This test is slow, especially on Windows.
 		// WARNING: each call to testExplorer.runner.run triggers one or more
 		// `go test` command runs (testUtils.goTest is spied, not mocked or replaced).
 		// Each `go test` command invocation can take seconds on slow machines.
 		// As we add more cases, the timeout should be increased accordingly.
+		this.timeout(20000); // I don't know why but timeout chained after `suite` didn't work.
+
 		const sandbox = sinon.createSandbox();
 		const subTestDir = path.join(fixtureDir, 'subTest');
 		const ctx = MockExtensionContext.new();
@@ -189,22 +206,27 @@ suite('Go Test Runner', () => {
 			// (so initialize request doesn't include workspace dir info). The codelens directory was
 			// used in the previous test suite. Figure out why.
 			await env.startGopls(uri.fsPath, undefined, subTestDir);
-			testExplorer = GoTestExplorer.setup(ctx, env.goCtx);
+			testExplorer = GoTestExplorer.new(ctx, env.goCtx);
+			ctx.subscriptions.push(testExplorer);
 			await forceDidOpenTextDocument(workspace, testExplorer, uri);
 
 			spy = sandbox.spy(testUtils, 'goTest');
 		});
 
-		// suiteTeardown
-		this.afterEach(async function () {
+		suiteTeardown(async () => {
 			await env.teardown();
-			env.flushTrace(this.currentTest?.state === 'failed');
 			ctx.teardown();
 			sandbox.restore();
 		});
 
+		teardown(async function () {
+			// Note: this shouldn't use () => {...}. Arrow functions do not have 'this'.
+			// I don't know why but this.currentTest.state does not have the expected value when
+			// used with teardown.
+			env.flushTrace(this.currentTest?.state === 'failed');
+		});
+
 		test('discover and run', async () => {
-			console.log('discover and run');
 			// Locate TestMain and TestOther
 			const tests = testExplorer.resolver.find(uri).filter((x) => GoTest.parseId(x.id).kind === 'test');
 			tests.sort((a, b) => a.label.localeCompare(b.label));
@@ -220,7 +242,8 @@ suite('Go Test Runner', () => {
 				await testExplorer.runner.run({
 					include: [tMain],
 					exclude: undefined,
-					profile: undefined
+					profile: undefined,
+					preserveFocus: false
 				}),
 				'Failed to execute `go test`'
 			);
@@ -256,7 +279,8 @@ suite('Go Test Runner', () => {
 				await testExplorer.runner.run({
 					include: [tSub],
 					exclude: undefined,
-					profile: undefined
+					profile: undefined,
+					preserveFocus: false
 				}),
 				'Failed to execute `go test`'
 			);
@@ -279,11 +303,12 @@ suite('Go Test Runner', () => {
 				await testExplorer.runner.run({
 					include: [tSub, tOther],
 					exclude: undefined,
-					profile: undefined
+					profile: undefined,
+					preserveFocus: false
 				}),
 				'Failed to execute `go test`'
 			);
 			assert.strictEqual(spy.callCount, 0, 'expected no calls to goTest');
-		}).timeout(10000);
+		});
 	});
 });

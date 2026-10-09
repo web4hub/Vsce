@@ -1,14 +1,9 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable node/no-deprecated-api */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------*/
 
 import assert from 'assert';
-import * as vscode from 'vscode';
-import { getGoConfig } from '../../src/config';
 import * as lsp from '../../src/language/goLanguageServer';
 import * as goInstallTools from '../../src/goInstallTools';
 import { getTool, Tool } from '../../src/goTools';
@@ -17,7 +12,7 @@ import semver = require('semver');
 import sinon = require('sinon');
 
 suite('gopls okForStagedRollout', () => {
-	const tool = getTool('gopls');
+	const tool: Tool = getTool('gopls')!;
 	const sandbox = sinon.createSandbox();
 	teardown(() => {
 		sandbox.restore();
@@ -53,9 +48,9 @@ suite('gopls okForStagedRollout', () => {
 
 suite('gopls update tests', () => {
 	test('prompt for update', async () => {
-		const tool = getTool('gopls');
+		const tool: Tool = getTool('gopls')!;
 
-		const toSemver = (v: string) => semver.parse(v, { includePrerelease: true, loose: true });
+		const toSemver = (v: string) => semver.parse(v, { loose: true });
 
 		// Fake data stubbed functions will serve.
 		const latestVersion = toSemver('0.4.1');
@@ -71,6 +66,8 @@ suite('gopls update tests', () => {
 			['up-to-date tagged (pre-release)', 'v0.4.0', true, latestPrereleaseVersion],
 			['developer version', '(devel)', false, null],
 			['developer version (pre-release)', '(devel)', true, null],
+			['developer version dirty', 'v0.0.0-20200521000000-2212a7e161a5+dirty', false, null],
+			['developer version dirty (pre-release)', 'v0.0.0-20200521000000-2212a7e161a5+dirty', true, null],
 			['nonsense version', 'nosuchversion', false, latestVersion],
 			['nonsense version (pre-release)', 'nosuchversion', true, latestPrereleaseVersion],
 			['latest pre-release', 'v0.4.2-pre1', false, null],
@@ -98,7 +95,7 @@ suite('gopls update tests', () => {
 			sinon.replace(lsp, 'getLocalGoplsVersion', async () => {
 				return { version: usersVersion };
 			});
-			sinon.replace(goInstallTools, 'latestToolVersion', async () => {
+			sinon.replace(goInstallTools, 'latestModuleVersion', async () => {
 				if (acceptPrerelease) {
 					return latestPrereleaseVersion;
 				}
@@ -131,7 +128,7 @@ suite('gopls update tests', () => {
 });
 
 suite('version comparison', () => {
-	const tool = getTool('dlv');
+	const tool: Tool = getTool('dlv')!;
 	const latestVersion = tool.latestVersion;
 
 	teardown(() => {

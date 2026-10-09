@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /*---------------------------------------------------------
  * Copyright 2021 The Go Authors. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -8,6 +6,8 @@ import path = require('path');
 import {
 	CancellationToken,
 	EndOfLine,
+	Event,
+	EventEmitter,
 	FileType,
 	MarkdownString,
 	Position,
@@ -15,7 +15,6 @@ import {
 	TestController,
 	TestItem,
 	TestItemCollection,
-	TestMessage,
 	TestRun,
 	TestRunProfile,
 	TestRunProfileKind,
@@ -69,7 +68,7 @@ class MockTestCollection implements TestItemCollection {
 		return this.m.get(id);
 	}
 
-	replace(items: readonly TestItem[]): void {
+	replace(): void {
 		throw new Error('not impelemented');
 	}
 }
@@ -78,7 +77,12 @@ class MockTestItem implements TestItem {
 	private static idNum = 0;
 	private idNum: number;
 
-	constructor(public id: string, public label: string, public uri: Uri | undefined, public ctrl: MockTestController) {
+	constructor(
+		public id: string,
+		public label: string,
+		public uri: Uri | undefined,
+		public ctrl: MockTestController
+	) {
 		this.idNum = MockTestItem.idNum;
 		MockTestItem.idNum++;
 	}
@@ -111,9 +115,13 @@ class MockTestRunProfile implements TestRunProfile {
 		public kind: TestRunProfileKind,
 		public runHandler: TestRunHandler,
 		public isDefault: boolean
-	) {}
+	) {
+		const emitter = new EventEmitter<boolean>();
+		this.onDidChangeDefault = emitter.event;
+	}
 	tag: TestTag | undefined;
-
+	onDidChangeDefault: Event<boolean>;
+	supportsContinuousRun = false;
 	configureHandler(): void {}
 	dispose(): void {}
 }
@@ -126,13 +134,20 @@ class MockTestRun implements TestRun {
 		throw new Error('Method not implemented.');
 	}
 
-	enqueued(test: TestItem): void {}
-	started(test: TestItem): void {}
-	skipped(test: TestItem): void {}
-	failed(test: TestItem, message: TestMessage | readonly TestMessage[], duration?: number): void {}
-	errored(test: TestItem, message: TestMessage | readonly TestMessage[], duration?: number): void {}
-	passed(test: TestItem, duration?: number): void {}
-	appendOutput(output: string): void {}
+	constructor() {
+		const emitter = new EventEmitter<void>();
+		this.onDidDispose = emitter.event;
+	}
+
+	addCoverage(): void {}
+	onDidDispose: Event<void>;
+	enqueued(): void {}
+	started(): void {}
+	skipped(): void {}
+	failed(): void {}
+	errored(): void {}
+	passed(): void {}
+	appendOutput(): void {}
 	end(): void {}
 }
 
@@ -144,7 +159,7 @@ export class MockTestController implements TestController {
 	resolveHandler?: (item: TestItem | undefined) => void | Thenable<void>;
 	refreshHandler: ((token: CancellationToken) => void | Thenable<void>) | undefined;
 
-	createTestRun(request: TestRunRequest, name?: string, persist?: boolean): TestRun {
+	createTestRun(): TestRun {
 		return new MockTestRun();
 	}
 
@@ -161,13 +176,17 @@ export class MockTestController implements TestController {
 		return new MockTestItem(id, label, uri, this);
 	}
 
+	invalidateTestResults(): void {}
 	dispose(): void {}
 }
 
 type DirEntry = [string, FileType];
 
 class MockTestFileSystem implements FileSystem {
-	constructor(public dirs: Map<string, DirEntry[]>, public files: Map<string, MockTestDocument>) {}
+	constructor(
+		public dirs: Map<string, DirEntry[]>,
+		public files: Map<string, MockTestDocument>
+	) {}
 
 	readDirectory(uri: Uri): Thenable<[string, FileType][]> {
 		const k = uri.with({ query: '', fragment: '' }).toString();
@@ -240,7 +259,10 @@ export class MockTestWorkspace implements Workspace {
 		return new this(wsdirs, new MockTestFileSystem(dirs, files));
 	}
 
-	constructor(public workspaceFolders: WorkspaceFolder[], public fs: MockTestFileSystem) {}
+	constructor(
+		public workspaceFolders: WorkspaceFolder[],
+		public fs: MockTestFileSystem
+	) {}
 
 	openTextDocument(uri: Uri): Thenable<TextDocument> {
 		const doc = this.fs.files.get(uri.toString());
@@ -270,6 +292,7 @@ class MockTestDocument implements TextDocument {
 
 	readonly version: number = 1;
 	readonly eol: EndOfLine = EndOfLine.LF;
+	readonly encoding: string = 'utf8';
 
 	get lineCount() {
 		return this._contents.split('\n').length;
@@ -294,15 +317,15 @@ class MockTestDocument implements TextDocument {
 
 	lineAt(line: number): TextLine;
 	lineAt(position: Position): TextLine;
-	lineAt(position: any): TextLine {
+	lineAt(): TextLine {
 		throw new Error('Method not implemented.');
 	}
 
-	offsetAt(position: Position): number {
+	offsetAt(): number {
 		throw new Error('Method not implemented.');
 	}
 
-	positionAt(offset: number): Position {
+	positionAt(): Position {
 		throw new Error('Method not implemented.');
 	}
 
@@ -313,15 +336,15 @@ class MockTestDocument implements TextDocument {
 		return this._contents;
 	}
 
-	getWordRangeAtPosition(position: Position, regex?: RegExp): Range {
+	getWordRangeAtPosition(): Range {
 		throw new Error('Method not implemented.');
 	}
 
-	validateRange(range: Range): Range {
+	validateRange(): Range {
 		throw new Error('Method not implemented.');
 	}
 
-	validatePosition(position: Position): Position {
+	validatePosition(): Position {
 		throw new Error('Method not implemented.');
 	}
 }

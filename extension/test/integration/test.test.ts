@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright 2020 The Go Authors. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -42,57 +41,57 @@ suite('Test Go Test Args', () => {
 
 	test('default config', () => {
 		runTest({
-			expectedArgs: 'test -timeout 30s ./...',
-			expectedOutArgs: 'test -timeout 30s ./...'
+			expectedArgs: 'test -test.fullpath=true -timeout 30s ./...',
+			expectedOutArgs: 'test -test.fullpath=true -timeout 30s ./...'
 		});
 	});
 	test('user flag [-v] enables -json flag', () => {
 		runTest({
-			expectedArgs: 'test -timeout 30s -json ./... -v',
-			expectedOutArgs: 'test -timeout 30s ./... -v',
+			expectedArgs: 'test -test.fullpath=true -timeout 30s -json ./... -v',
+			expectedOutArgs: 'test -test.fullpath=true -timeout 30s ./... -v',
 			flags: ['-v']
 		});
 	});
 	test('user flag [-json -v] prevents -json flag addition', () => {
 		runTest({
-			expectedArgs: 'test -timeout 30s ./... -json -v',
-			expectedOutArgs: 'test -timeout 30s ./... -json -v',
+			expectedArgs: 'test -test.fullpath=true -timeout 30s ./... -json -v',
+			expectedOutArgs: 'test -test.fullpath=true -timeout 30s ./... -json -v',
 			flags: ['-json', '-v']
 		});
 	});
 	test('user flag [-args] does not crash', () => {
 		runTest({
-			expectedArgs: 'test -timeout 30s ./... -args',
-			expectedOutArgs: 'test -timeout 30s ./... -args',
+			expectedArgs: 'test -test.fullpath=true -timeout 30s ./... -args',
+			expectedOutArgs: 'test -test.fullpath=true -timeout 30s ./... -args',
 			flags: ['-args']
 		});
 	});
 	test('user flag [-args -v] does not enable -json flag', () => {
 		runTest({
-			expectedArgs: 'test -timeout 30s ./... -args -v',
-			expectedOutArgs: 'test -timeout 30s ./... -args -v',
+			expectedArgs: 'test -test.fullpath=true -timeout 30s ./... -args -v',
+			expectedOutArgs: 'test -test.fullpath=true -timeout 30s ./... -args -v',
 			flags: ['-args', '-v']
 		});
 	});
 	test('specifying functions adds -run flags', () => {
 		runTest({
-			expectedArgs: 'test -timeout 30s -run ^(TestA|TestB)$ ./...',
-			expectedOutArgs: 'test -timeout 30s -run ^(TestA|TestB)$ ./...',
+			expectedArgs: 'test -test.fullpath=true -timeout 30s -run ^(TestA|TestB)$ ./...',
+			expectedOutArgs: 'test -test.fullpath=true -timeout 30s -run ^(TestA|TestB)$ ./...',
 			functions: ['TestA', 'TestB']
 		});
 	});
 	test('functions & benchmark adds -bench flags and skips timeout', () => {
 		runTest({
-			expectedArgs: 'test -benchmem -run=^$ -bench ^(TestA|TestB)$ ./...',
-			expectedOutArgs: 'test -benchmem -run=^$ -bench ^(TestA|TestB)$ ./...',
+			expectedArgs: 'test -test.fullpath=true -benchmem -run=^$ -bench ^(TestA|TestB)$ ./...',
+			expectedOutArgs: 'test -test.fullpath=true -benchmem -run=^$ -bench ^(TestA|TestB)$ ./...',
 			functions: ['TestA', 'TestB'],
 			isBenchmark: true
 		});
 	});
 	test('user -run flag is ignored when functions are provided', () => {
 		runTest({
-			expectedArgs: 'test -timeout 30s -run ^(TestA|TestB)$ ./...',
-			expectedOutArgs: 'test -timeout 30s -run ^(TestA|TestB)$ ./...',
+			expectedArgs: 'test -test.fullpath=true -timeout 30s -run ^(TestA|TestB)$ ./...',
+			expectedOutArgs: 'test -test.fullpath=true -timeout 30s -run ^(TestA|TestB)$ ./...',
 			functions: ['TestA', 'TestB'],
 			flags: ['-run', 'TestC']
 		});
@@ -100,9 +99,9 @@ suite('Test Go Test Args', () => {
 	test('use -testify.m for methods', () => {
 		runTest({
 			expectedArgs:
-				'test -timeout 30s -run ^TestExampleTestSuite$ -testify.m ^(TestExample|TestAnotherExample)$ ./...',
+				'test -test.fullpath=true -timeout 30s -run ^TestExampleTestSuite$ -testify.m ^(TestExample|TestAnotherExample)$ ./...',
 			expectedOutArgs:
-				'test -timeout 30s -run ^TestExampleTestSuite$ -testify.m ^(TestExample|TestAnotherExample)$ ./...',
+				'test -test.fullpath=true -timeout 30s -run ^TestExampleTestSuite$ -testify.m ^(TestExample|TestAnotherExample)$ ./...',
 			functions: [
 				'(*ExampleTestSuite).TestExample',
 				'(*ExampleTestSuite).TestAnotherExample',
@@ -171,7 +170,7 @@ suite('Test Go Test', function () {
 			const result = await goTest(testConfig);
 			assert.equal(result, false); // we expect tests to fail.
 		} catch (e) {
-			console.log('exception: ${e}');
+			console.log(`exception: ${e}`);
 		}
 
 		const testOutput = outputChannel.toString();
@@ -224,8 +223,13 @@ suite('Test Go Test', function () {
 // FakeOutputChannel is a fake output channel used to buffer
 // the output of the tested language client in an in-memory
 // string array until cleared.
-class FakeOutputChannel implements vscode.OutputChannel {
+class FakeOutputChannel implements vscode.LogOutputChannel {
 	public name = 'FakeOutputChannel';
+
+	// Satisfies vscode.LogOutputChannel interface.
+	public logLevel = vscode.LogLevel.Info;
+	public onDidChangeLogLevel = new vscode.EventEmitter<vscode.LogLevel>().event;
+
 	public show = sinon.fake(); // no-empty
 	public hide = sinon.fake(); // no-empty
 	public dispose = sinon.fake(); // no-empty
@@ -235,6 +239,11 @@ class FakeOutputChannel implements vscode.OutputChannel {
 
 	public append = (v: string) => this.enqueue(v);
 	public appendLine = (v: string) => this.enqueue(v);
+	public error = (...args: any[]) => this.enqueue(args.join(' '));
+	public warn = (...args: any[]) => this.enqueue(args.join(' '));
+	public info = (...args: any[]) => this.enqueue(args.join(' '));
+	public debug = (...args: any[]) => this.enqueue(args.join(' '));
+	public trace = (...args: any[]) => this.enqueue(args.join(' '));
 	public clear = () => {
 		this.buf = [];
 	};

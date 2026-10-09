@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /*---------------------------------------------------------
  * Copyright 2020 The Go Authors. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -22,6 +21,9 @@ suite('Coverage for tests', function () {
 	let fixtureSourcePath: string;
 	let coverFilePath: string;
 
+	// updateGoVarsFromConfig mutates process.env. Restore to prevEnv in suiteTeardown.
+	// TODO: avoid updateGoVarsFromConfig.
+	const prevEnv = Object.assign({}, process.env);
 	suiteSetup(async () => {
 		await updateGoVarsFromConfig({});
 
@@ -30,9 +32,12 @@ suite('Coverage for tests', function () {
 		coverFilePath = path.join(fixtureSourcePath, 'cover.out');
 		return;
 	});
+	suiteTeardown(() => {
+		process.env = prevEnv;
+	});
 	test('resolve import paths', async () => {
 		initForTest();
-		const x = vscode.workspace.openTextDocument(coverFilePath);
+		await vscode.workspace.openTextDocument(coverFilePath);
 		await applyCodeCoverageToAllEditors(coverFilePath, fixtureSourcePath);
 		const files = Object.keys(coverageFilesForTest());
 		const aDotGo = files.includes(path.join(fixtureSourcePath, 'a', 'a.go'));

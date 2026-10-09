@@ -3,6 +3,13 @@
 // license that can be found in the LICENSE file.
 
 // Binary installtools is a helper that installs Go tools extension tests depend on.
+// In order to allow this script to use the go version in the sytem or your choice,
+// avoid running this with `go run` (that may auto-upgrade the toolchain to meet
+// the go version requirement in extension/go.mod).
+// Instead, build this script, and run the compiled executable.
+// For example,
+//
+//	go build -o /tmp/script . && /tmp/script
 package main
 
 import (
@@ -13,44 +20,26 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
-
-// finalVersion encodes the fact that the specified tool version
-// is the known last version that can be buildable with goMinorVersion.
-type finalVersion struct {
-	goMinorVersion int
-	version        string
-}
 
 var tools = []struct {
 	path          string
 	dest          string
 	preferPreview bool
-	// versions is a list of supportedVersions sorted by
-	// goMinorVersion. If we want to pin a tool's version
-	// add a fake entry with a large goMinorVersion
-	// value and the pinned tool version as the last entry.
-	// Nil of empty list indicates we can use the `latest` version.
-	versions []finalVersion
+	version       string // pinned version, or empty string to use "latest" (or preview if preferPreview)
 }{
 	// TODO: auto-generate based on allTools.ts.in.
-	{"golang.org/x/tools/gopls", "", true, nil},
-	{"github.com/cweill/gotests/gotests", "", false, nil},
-	{"github.com/haya14busa/goplay/cmd/goplay", "", false, nil},
-	{"honnef.co/go/tools/cmd/staticcheck", "", false, []finalVersion{{18, "v0.3.3"}, {20, "v0.4.7"}}},
-	{"github.com/go-delve/delve/cmd/dlv", "", false, []finalVersion{{16, "v1.8.3"}, {17, "v1.9.1"}, {18, "v1.20.2"}, {20, "v1.22.1"}}},
-}
-
-// pickVersion returns the version to install based on the supported
-// version list.
-func pickVersion(goMinorVersion int, versions []finalVersion, defaultVersion string) string {
-	for _, v := range versions {
-		if goMinorVersion <= v.goMinorVersion {
-			return v.version
-		}
-	}
-	return defaultVersion
+	{"golang.org/x/tools/gopls", "", true, ""},
+	{"github.com/cweill/gotests/gotests", "", false, ""},
+	{"github.com/haya14busa/goplay/cmd/goplay", "", false, ""},
+	{"honnef.co/go/tools/cmd/staticcheck", "", false, ""},
+	// For regression test: golang/vscode-go#3511
+	{"github.com/golangci/golangci-lint/v2/cmd/golangci-lint", "golangci-lint-v2", false, ""},
+	{"github.com/go-delve/delve/cmd/dlv", "", false, ""},
+	// TODO(hxjiang): remove from test after deprecate the "impl".
+	{"github.com/josharian/impl", "", false, "v1.5.0"},
 }
 
 func main() {
@@ -58,21 +47,19 @@ func main() {
 	if err != nil {
 		exitf("failed to find go version: %v", err)
 	}
-	if ver < 1 {
-		exitf("unsupported go version: 1.%v", ver)
-	}
+	fmt.Printf("installing tools for go1.%d...\n", ver)
 
 	bin, err := goBin()
 	if err != nil {
 		exitf("failed to determine go tool installation directory: %v", err)
 	}
-	err = installTools(bin, ver)
+	err = installTools(bin)
 	if err != nil {
 		exitf("failed to install tools: %v", err)
 	}
 }
 
-func exitf(format string, args ...interface{}) {
+func exitf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format, args...)
 	os.Exit(1)
 }
@@ -80,7 +67,9 @@ func exitf(format string, args ...interface{}) {
 // goVersion returns an integer N if go's version is 1.N.
 func goVersion() (int, error) {
 	cmd := exec.Command("go", "list", "-e", "-f", `{{context.ReleaseTags}}`, "--", "unsafe")
-	cmd.Env = append(os.Environ(), "GO111MODULE=off")
+	// GO111MODULE=off implicitly disables GOTOOLCHAIN switch,
+	// but let's make sure it doesn't change.
+	cmd.Env = append(os.Environ(), "GO111MODULE=off", "GOTOOLCHAIN=local")
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("go list error: %v", err)
@@ -91,9 +80,9 @@ func goVersion() (int, error) {
 	}
 	// Split up "[go1.1 go1.15]"
 	tags := strings.Fields(result[1 : len(result)-2])
-	for i := len(tags) - 1; i >= 0; i-- {
+	for _, tag := range slices.Backward(tags) {
 		var version int
-		if _, err := fmt.Sscanf(tags[i], "go1.%d", &version); err != nil {
+		if _, err := fmt.Sscanf(tag, "go1.%d", &version); err != nil {
 			continue
 		}
 		return version, nil
@@ -106,7 +95,8 @@ func goBin() (string, error) {
 	if gobin := os.Getenv("GOBIN"); gobin != "" {
 		return gobin, nil
 	}
-	out, err := exec.Command("go", "env", "GOPATH").Output()
+	cmd := exec.Command("go", "env", "GOPATH")
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
@@ -117,23 +107,19 @@ func goBin() (string, error) {
 	return filepath.Join(gopaths[0], "bin"), nil
 }
 
-func installTools(binDir string, goMinorVersion int) error {
+func installTools(binDir string) error {
 	installCmd := "install"
-	if goMinorVersion < 16 {
-		installCmd = "get"
-	}
 
-	dir := ""
-	if installCmd == "get" { // run `go get` command from an empty directory.
-		dir = os.TempDir()
-	}
-	env := append(os.Environ(), "GO111MODULE=on")
+	// For tools installation, ensure GOTOOLCHAIN=auto.
+	env := append(os.Environ(), "GO111MODULE=on", "GOTOOLCHAIN=auto")
 	for _, tool := range tools {
-		ver := pickVersion(goMinorVersion, tool.versions, pickLatest(tool.path, tool.preferPreview))
+		ver := tool.version
+		if ver == "" {
+			ver = pickLatest(tool.path, tool.preferPreview)
+		}
 		path := tool.path + "@" + ver
 		cmd := exec.Command("go", installCmd, path)
 		cmd.Env = env
-		cmd.Dir = dir
 		fmt.Println("go", installCmd, path)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("installing %v: %s\n%v", path, out, err)
@@ -163,7 +149,13 @@ func pickLatest(toolPath string, preferPreview bool) string {
 	if !preferPreview {
 		return "latest" // should we pick the pinned version in allTools.ts.in?
 	}
-	out, err := exec.Command("go", "list", "-m", "--versions", toolPath).Output()
+
+	cmd := exec.Command("go", "list", "-m", "--versions", toolPath)
+
+	// Avoid using module proxy to eliminate flakiness caused by module proxy.
+	cmd.Env = append(os.Environ(), "GOPROXY=direct")
+
+	out, err := cmd.Output()
 	if err != nil {
 		exitf("failed to find a suitable version for %q: %v", toolPath, err)
 	}

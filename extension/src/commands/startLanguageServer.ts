@@ -11,13 +11,10 @@ import { GoExtensionContext } from '../context';
 import { outputChannel, updateLanguageServerIconGoStatusBar } from '../goStatus';
 import {
 	buildLanguageClient,
-	buildLanguageClientOption,
 	buildLanguageServerConfig,
-	errorKind,
 	RestartReason,
 	scheduleGoplsSuggestions,
 	stopLanguageClient,
-	suggestGoplsIssueReport,
 	toServerInfo,
 	updateRestartHistory
 } from '../language/goLanguageServer';
@@ -38,14 +35,6 @@ export const startLanguageServer: CommandFactory = (ctx, goCtx) => {
 		const unlock = await languageServerStartMutex.lock();
 		goCtx.latestConfig = cfg;
 		try {
-			if (reason === RestartReason.MANUAL) {
-				await suggestGoplsIssueReport(
-					goCtx,
-					cfg,
-					"Looks like you're about to manually restart the language server.",
-					errorKind.manualRestart
-				);
-			}
 			outputChannel.info(`Try to start language server - ${reason} (enabled: ${cfg.enabled})`);
 
 			// If the client has already been started, make sure to clear existing
@@ -85,7 +74,7 @@ export const startLanguageServer: CommandFactory = (ctx, goCtx) => {
 				return;
 			}
 
-			goCtx.languageClient = await buildLanguageClient(goCtx, buildLanguageClientOption(goCtx, cfg));
+			goCtx.languageClient = await buildLanguageClient(goCtx, cfg);
 			await goCtx.languageClient.start();
 			goCtx.serverInfo = toServerInfo(goCtx.languageClient.initializeResult);
 			goCtx.telemetryService = new TelemetryService(

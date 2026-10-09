@@ -11,7 +11,7 @@ export { applyCoverprofile } from './applyCoverprofile';
 export { getConfiguredGoTools } from './getConfiguredGoTools';
 export { getCurrentGoPath } from './getCurrentGoPath';
 export { getCurrentGoRoot } from './getCurrentGoRoot';
-export { implCursor } from '../goImpl';
+export { goplsImpl, legacyImpl } from '../goImpl';
 export { addTags, removeTags } from '../goModifytags';
 export * from '../goTest';
 export { installTools } from './installTools';
@@ -24,7 +24,6 @@ export { toggleGCDetails } from './toggleGCDetails';
 
 type CommandCallback<T extends unknown[]> = (...args: T) => Promise<unknown> | unknown;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type CommandFactory<T extends unknown[] = any[]> = (
 	ctx: vscode.ExtensionContext,
 	goCtx: GoExtensionContext

@@ -1,6 +1,3 @@
-/* eslint-disable prettier/prettier */
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable node/no-unpublished-import */
 /*---------------------------------------------------------
  * Copyright 2020 The Go Authors. All rights reserved.
  * Licensed under the MIT License. See LICENSE in the project root for license information.
@@ -41,10 +38,10 @@ describe('#getLatestGoVersion()', function () {
 			{ version: 'go1.14.2', stable: true }
 		]);
 		const fetchMock = sandbox.mock(fetchModule);
-		fetchMock.expects('default')
+		fetchMock
+			.expects('default')
 			.withArgs('https://go.dev/dl/?mode=json')
-			.returns(Promise.resolve(
-				new fetchModule.Response(responseJSON)));
+			.returns(Promise.resolve(new fetchModule.Response(responseJSON)));
 		const mmnt = sandbox.mock(moment);
 		mmnt.expects('now').returns(now);
 	});

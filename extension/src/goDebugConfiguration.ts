@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable no-prototype-builtins */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
@@ -33,6 +32,8 @@ import { parseEnvFiles } from './utils/envUtils';
 import { resolveHomeDir } from './utils/pathUtils';
 import { createRegisterCommand } from './commands';
 import { GoExtensionContext } from './context';
+import { spawn } from 'child_process';
+import { registerGoDebugCommands } from './goDebugCommands';
 
 let dlvDAPVersionChecked = false;
 
@@ -44,14 +45,12 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 		const registerCommand = createRegisterCommand(ctx, goCtx);
 		registerCommand('go.debug.pickProcess', () => pickProcess);
 		registerCommand('go.debug.pickGoProcess', () => pickGoProcess);
+		registerGoDebugCommands(ctx);
 	}
 
 	constructor(private defaultDebugAdapterType: string = 'go') {}
 
-	public async provideDebugConfigurations(
-		_folder: vscode.WorkspaceFolder | undefined,
-		_token?: vscode.CancellationToken
-	): Promise<vscode.DebugConfiguration[] | undefined> {
+	public async provideDebugConfigurations(): Promise<vscode.DebugConfiguration[] | undefined> {
 		return await this.pickConfiguration();
 	}
 
@@ -133,8 +132,7 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 
 	public async resolveDebugConfiguration(
 		folder: vscode.WorkspaceFolder | undefined,
-		debugConfiguration: vscode.DebugConfiguration,
-		_token?: vscode.CancellationToken
+		debugConfiguration: vscode.DebugConfiguration
 	): Promise<vscode.DebugConfiguration | undefined> {
 		const activeEditor = vscode.window.activeTextEditor;
 		if (!debugConfiguration || !debugConfiguration.request) {
@@ -169,8 +167,10 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 
 		const goConfig = getGoConfig(folder && folder.uri);
 		const dlvConfig = goConfig['delveConfig'];
-		const defaultConfig = vscode.extensions.getExtension(extensionId)?.packageJSON.contributes.configuration
-			.properties['go.delveConfig'].properties;
+		const defaultConfig =
+			vscode.extensions.getExtension(extensionId)?.packageJSON.contributes.configuration.properties[
+				'go.delveConfig'
+			].properties;
 
 		// Figure out which debugAdapter is being used first, so we can use this to send warnings
 		// for properties that don't apply.
@@ -182,12 +182,23 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 				debugConfiguration['debugAdapter'] = dlvConfig['debugAdapter'];
 			}
 		}
-		// If neither launch.json nor settings.json gave us the debugAdapter value, we go with the default
-		// from package.json (dlv-dap) unless this is remote attach with a stable release.
+
+		// If neither launch.json nor settings.json gave us the debugAdapter, we go with the default from pacakge.json (dlv-dap) for all modes except 'remote'.
+		// For remote we will use 'dlv-dap' if we can call 'dlv substitute-path-guess-helper' or 'legacy' otherwise.
 		if (!debugConfiguration['debugAdapter']) {
+			// set dlv-dap by default
 			debugConfiguration['debugAdapter'] = defaultConfig.debugAdapter.default;
-			if (debugConfiguration['mode'] === 'remote' && !extensionInfo.isPreview) {
-				debugConfiguration['debugAdapter'] = 'legacy';
+			if (debugConfiguration['mode'] === 'remote') {
+				const substitutePathGuess = await this.guessSubstitutePath();
+				if (substitutePathGuess === null) {
+					if (!extensionInfo.isPreview) {
+						// can't guess substitute path and isPreview isn't set, fall back to legacy.
+						debugConfiguration['debugAdapter'] = 'legacy';
+					}
+				} else {
+					debugConfiguration['debugAdapter'] = defaultConfig.debugAdapter.default;
+					debugConfiguration['guessSubstitutePath'] = substitutePathGuess;
+				}
 			}
 		}
 		if (debugConfiguration['debugAdapter'] === 'dlv-dap') {
@@ -372,6 +383,37 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 		return debugConfiguration;
 	}
 
+	/**
+	 * Calls `dlv substitute-path-guess-helper` to get a set of parameters used by Delve to guess the substitutePath configuration after also examining the executable.
+	 *
+	 * See https://github.com/go-delve/delve/blob/d5fb3bee427202f0d4b1683bf743bfd2adb41757/service/debugger/debugger.go#L2466
+	 */
+	async guessSubstitutePath(): Promise<object | null> {
+		return new Promise((resolve) => {
+			const child = spawn(getBinPath('dlv'), ['substitute-path-guess-helper']);
+			let stdoutData = '';
+			child.stdout.on('data', (data) => {
+				stdoutData += data;
+			});
+
+			child.on('close', (code) => {
+				if (code !== 0) {
+					resolve(null);
+				} else {
+					try {
+						resolve(JSON.parse(stdoutData));
+					} catch {
+						resolve(null);
+					}
+				}
+			});
+
+			child.on('error', () => {
+				resolve(null);
+			});
+		});
+	}
+
 	public removeGcflags(args: string): { args: string; removed: boolean } {
 		// From `go help build`
 		// ...
@@ -411,8 +453,7 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 
 	public resolveDebugConfigurationWithSubstitutedVariables(
 		folder: vscode.WorkspaceFolder | undefined,
-		debugConfiguration: vscode.DebugConfiguration,
-		_token?: vscode.CancellationToken
+		debugConfiguration: vscode.DebugConfiguration
 	): vscode.DebugConfiguration | null {
 		const debugAdapter = debugConfiguration['debugAdapter'];
 		if (debugAdapter === '') {
@@ -441,24 +482,45 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 		debugConfiguration['env'] = Object.assign(goToolsEnvVars, fileEnvs, env);
 		debugConfiguration['envFile'] = undefined; // unset, since we already processed.
 
-		const entriesWithRelativePaths = ['cwd', 'output', 'program'].filter(
-			(attr) => debugConfiguration[attr] && !path.isAbsolute(debugConfiguration[attr])
-		);
 		if (debugAdapter === 'dlv-dap') {
-			// 1. Relative paths -> absolute paths
-			if (entriesWithRelativePaths.length > 0) {
-				const workspaceRoot = folder?.uri.fsPath;
-				if (workspaceRoot) {
-					entriesWithRelativePaths.forEach((attr) => {
-						debugConfiguration[attr] = path.join(workspaceRoot, debugConfiguration[attr]);
-					});
-				} else {
+			// If the user provides a relative path outside of a workspace
+			// folder, warn them, but only once.
+			let didWarn = false;
+			const makeRelative = (s: string) => {
+				if (folder) {
+					return path.join(folder.uri.fsPath, s);
+				}
+
+				if (!didWarn) {
+					didWarn = true;
 					this.showWarning(
 						'relativePathsWithoutWorkspaceFolder',
 						'Behavior when using relative paths without a workspace folder for `cwd`, `program`, or `output` is undefined.'
 					);
 				}
-			}
+
+				return s;
+			};
+
+			// 1. Relative paths -> absolute paths
+			['cwd', 'output', 'program'].forEach((attr) => {
+				const value = debugConfiguration[attr];
+				if (!value || path.isAbsolute(value)) return;
+
+				// Make the path relative (the program attribute needs
+				// additional checks).
+				if (attr !== 'program') {
+					debugConfiguration[attr] = makeRelative(value);
+					return;
+				}
+
+				// If the program could be a package URL, don't alter it unless
+				// we can confirm that it is also a file path.
+				if (!isPackageUrl(value) || isFsPath(value, folder?.uri.fsPath)) {
+					debugConfiguration[attr] = makeRelative(value);
+				}
+			});
+
 			// 2. For launch debug/test modes that builds the debug target,
 			//    delve needs to be launched from the right directory (inside the main module of the target).
 			//    Compute the launch dir heuristically, and translate the dirname in program to a path relative to buildDir.
@@ -471,7 +533,8 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 					// with a relative path. (https://github.com/golang/vscode-go/issues/1713)
 					// parseDebugProgramArgSync will throw an error if `program` is invalid.
 					const { program, dirname, programIsDirectory } = parseDebugProgramArgSync(
-						debugConfiguration['program']
+						debugConfiguration['program'],
+						folder?.uri.fsPath
 					);
 					if (
 						dirname &&
@@ -527,7 +590,7 @@ export class GoDebugConfigurationProvider implements vscode.DebugConfigurationPr
 // exported for testing.
 export async function maybeJoinFlags(dlvToolPath: string, flags: string | string[]) {
 	const { moduleVersion } = await inspectGoToolVersion(dlvToolPath);
-	const localVersion = semver.parse(moduleVersion, { includePrerelease: true });
+	const localVersion = semver.parse(moduleVersion);
 	if (typeof flags !== 'string' && (!localVersion || semver.lt(localVersion, '1.22.2'))) {
 		flags = flags.join(' ');
 	}
@@ -536,10 +599,14 @@ export async function maybeJoinFlags(dlvToolPath: string, flags: string | string
 
 // parseDebugProgramArgSync parses program arg of debug/auto/test launch requests.
 export function parseDebugProgramArgSync(
-	program: string
-): { program: string; dirname: string; programIsDirectory: boolean } {
+	program: string,
+	cwd?: string
+): { program: string; dirname?: string; programIsDirectory: boolean } {
 	if (!program) {
 		throw new Error('The program attribute is missing in the debug configuration in launch.json');
+	}
+	if (isPackageUrl(program) && !isFsPath(program, cwd)) {
+		return { program, programIsDirectory: true };
 	}
 	try {
 		const pstats = lstatSync(program);
@@ -558,4 +625,48 @@ export function parseDebugProgramArgSync(
 	throw new Error(
 		`The program attribute '${program}' must be a valid directory or .go file in debug/test/auto modes.`
 	);
+}
+
+/**
+ * Returns true if the given string is an absolute path or refers to a file or
+ * directory in the current working directory, or `wd` if specified.
+ * @param s The prospective file or directory path.
+ * @param wd The working directory to use instead of `process.cwd()`.
+ */
+function isFsPath(s: string, wd?: string) {
+	// If it's absolute, it's a path.
+	if (path.isAbsolute(s)) return;
+
+	// If the caller specifies a working directory, make the prospective path
+	// absolute.
+	if (wd) s = path.join(wd, s);
+
+	try {
+		// If lstat doesn't throw, the path refers to a file or directory.
+		lstatSync(s);
+		return true;
+	} catch (error) {
+		// ENOENT means nothing exists at the specified path.
+		if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+			return false;
+		}
+
+		// If the error is something unexpected, rethrow it.
+		throw error;
+	}
+}
+
+function isPackageUrl(s: string) {
+	// If the string does not contain `/` and ends with .go it is most likely
+	// intended to be a file path. If the file exists it would be caught by
+	// isFsPath, but otherwise "the file doesn't exist" is much less confusing
+	// than "the package doesn't exist" if the user is trying to execute a test
+	// file and got the path wrong.
+	if (s.match(/^[^/]*\.go$/)) {
+		return s;
+	}
+
+	// If the string starts with domain.tld/ and it doesn't reference a file,
+	// assume it's a package URL
+	return s.match(/^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9](\.[a-zA-Z]{2,})+\//);
 }

@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 /*---------------------------------------------------------
  * Copyright (C) Microsoft Corporation. All rights reserved.
  * Modification copyright 2020 The Go Authors. All rights reserved.
@@ -8,10 +6,7 @@
 
 'use strict';
 
-import { extensionInfo, getGoConfig } from './config';
 import { browsePackages } from './goBrowsePackage';
-import { buildCode } from './goBuild';
-import { notifyIfGeneratedFile, removeTestStatus } from './goCheck';
 import {
 	applyCodeCoverage,
 	initCoverageDecorators,
@@ -39,15 +34,17 @@ import {
 	maybeInstallVSCGO,
 	maybeInstallImportantTools
 } from './goInstallTools';
-import { RestartReason, showServerOutputChannel, watchLanguageServerConfiguration } from './language/goLanguageServer';
-import { lintCode } from './goLint';
+import { RestartReason, showServerOutputChannel, promptAboutGoplsOptOut } from './language/goLanguageServer';
 import { GO_MODE } from './goMode';
 import { GO111MODULE, goModInit } from './goModules';
 import { playgroundCommand } from './goPlayground';
 import { GoRunTestCodeLensProvider } from './goRunTestCodelens';
-import { disposeGoStatusBar, expandGoStatusBar, outputChannel, updateGoStatusBar } from './goStatus';
+import { disposeGoStatusBar, expandGoStatusBar, updateGoStatusBar } from './goStatus';
 
-import { vetCode } from './goVet';
+import { buildCode } from './diagnostics/goBuild';
+import { lintCode } from './diagnostics/goLint';
+import { vetCode } from './diagnostics/goVet';
+import { notifyIfGeneratedFile, removeTestStatus } from './diagnostics/goCheck';
 import {
 	getFromGlobalState,
 	resetGlobalState,
@@ -58,21 +55,24 @@ import {
 } from './stateUtils';
 import { cancelRunningTests, showTestOutput } from './testUtils';
 import { cleanupTempDir, getBinPath, getToolsGopath } from './util';
-import { clearCacheForTools } from './utils/pathUtils';
 import { WelcomePanel } from './welcome';
 import vscode = require('vscode');
-import { getFormatTool } from './language/legacy/goFormat';
-import { resetSurveyConfigs, showSurveyConfig } from './goSurvey';
+import { resetSurveyStates, showSurveyStates } from './goSurvey';
 import { ExtensionAPI } from './export';
 import extensionAPI from './extensionAPI';
-import { GoTestExplorer, isVscodeTestingAPIAvailable } from './goTest/explore';
+import { GoTestExplorer } from './goTest/explore';
 import { killRunningPprof } from './goTest/profile';
 import { GoExplorerProvider } from './goExplorer';
+import { GoPackageOutlineProvider } from './goPackageOutline';
 import { GoExtensionContext } from './context';
 import * as commands from './commands';
 import { toggleVulncheckCommandFactory } from './goVulncheck';
 import { GoTaskProvider } from './goTaskProvider';
-import { setTelemetryEnvVars, telemetryReporter } from './goTelemetry';
+import { setTelemetryEnvVars, activationLatency, telemetryReporter } from './goTelemetry';
+import { experiments } from './experimental';
+import { extensionInfo, getGoConfig, getGoplsConfig, validateConfig } from './config';
+import { clearCacheForTools } from './utils/pathUtils';
+import { getFormatTool } from './language/legacy/goFormat';
 
 const goCtx: GoExtensionContext = {};
 
@@ -136,8 +136,8 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<ExtensionA
 	await maybeInstallImportantTools(cfg.get('alternateTools'));
 	await commands.startLanguageServer(ctx, goCtx)(RestartReason.ACTIVATION);
 
-	suggestUpdates();
-	offerToInstallLatestGoVersion(ctx);
+	void suggestUpdates();
+	void offerToInstallLatestGoVersion(ctx);
 
 	initCoverageDecorators(ctx);
 
@@ -147,6 +147,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<ExtensionA
 	GoRunTestCodeLensProvider.activate(ctx, goCtx);
 	GoDebugConfigurationProvider.activate(ctx, goCtx);
 	GoDebugFactory.activate(ctx, goCtx);
+	experiments.activate(ctx);
+	GoTestExplorer.setup(ctx, goCtx);
+	GoExplorerProvider.setup(ctx);
+	GoPackageOutlineProvider.setup(ctx);
 
 	goCtx.buildDiagnosticCollection = vscode.languages.createDiagnosticCollection('go');
 	ctx.subscriptions.push(goCtx.buildDiagnosticCollection);
@@ -162,7 +166,8 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<ExtensionA
 	registerCommand('go.locate.tools', commands.getConfiguredGoTools);
 	registerCommand('go.add.tags', commands.addTags);
 	registerCommand('go.remove.tags', commands.removeTags);
-	registerCommand('go.impl.cursor', commands.implCursor);
+	registerCommand('go.impl.cursor', commands.goplsImpl);
+	registerCommand('go.impl.cursor.legacy', commands.legacyImpl);
 	registerCommand('go.test.cursor', commands.testAtCursor('test'));
 	registerCommand('go.test.cursorOrPrevious', commands.testAtCursorOrPrevious('test'));
 	registerCommand('go.subtest.cursor', commands.subTestAtCursor('test'));
@@ -185,15 +190,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<ExtensionA
 	registerCommand('go.tools.install', commands.installTools);
 	registerCommand('go.browse.packages', browsePackages);
 
-	if (isVscodeTestingAPIAvailable && cfg.get<boolean>('testExplorer.enable')) {
-		GoTestExplorer.setup(ctx, goCtx);
-	}
-
-	GoExplorerProvider.setup(ctx);
-
 	registerCommand('go.test.generate.package', goGenerateTests.generateTestCurrentPackage);
 	registerCommand('go.test.generate.file', goGenerateTests.generateTestCurrentFile);
-	registerCommand('go.test.generate.function', goGenerateTests.generateTestCurrentFunction);
+	registerCommand('go.test.generate.function.legacy', goGenerateTests.generateTestCurrentFunction);
+	registerCommand('go.test.generate.function', goGenerateTests.goplsGenerateTest);
 	registerCommand('go.toggle.test.file', goGenerateTests.toggleTestFile);
 	registerCommand('go.debug.startSession', commands.startDebugSession);
 	registerCommand('go.show.commands', commands.showCommands);
@@ -218,10 +218,10 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<ExtensionA
 	registerCommand('go.environment.choose', chooseGoEnvironment);
 
 	// Survey related commands
-	registerCommand('go.survey.showConfig', showSurveyConfig);
-	registerCommand('go.survey.resetConfig', resetSurveyConfigs);
+	registerCommand('go.survey.showConfig', showSurveyStates);
+	registerCommand('go.survey.resetConfig', resetSurveyStates);
 
-	addOnDidChangeConfigListeners(ctx);
+	addConfigChangeListener(ctx);
 	addOnChangeTextDocumentListeners(ctx);
 	addOnChangeActiveTextEditorListeners(ctx);
 	addOnSaveTextDocumentListeners(ctx);
@@ -239,22 +239,6 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<ExtensionA
 	return extensionAPI;
 }
 
-function activationLatency(duration: number): string {
-	// TODO: generalize and move to goTelemetry.ts
-	let bucket = '>=5s';
-
-	if (duration < 100) {
-		bucket = '<100ms';
-	} else if (duration < 500) {
-		bucket = '<500ms';
-	} else if (duration < 1000) {
-		bucket = '<1s';
-	} else if (duration < 5000) {
-		bucket = '<5s';
-	}
-	return 'activation_latency:' + bucket;
-}
-
 export function deactivate() {
 	return Promise.all([
 		goCtx.languageClient?.stop(),
@@ -266,21 +250,48 @@ export function deactivate() {
 	]);
 }
 
-function addOnDidChangeConfigListeners(ctx: vscode.ExtensionContext) {
+export function addConfigChangeListener(ctx: vscode.ExtensionContext) {
 	// Subscribe to notifications for changes to the configuration
 	// of the language server, even if it's not currently in use.
 	ctx.subscriptions.push(
-		vscode.workspace.onDidChangeConfiguration((e) => watchLanguageServerConfiguration(goCtx, e))
+		vscode.workspace.onDidChangeConfiguration((e) => {
+			const goConfig = getGoConfig();
+			const goplsConfig = getGoplsConfig();
+
+			void validateConfig(goConfig, goplsConfig);
+
+			if (!e.affectsConfiguration('go')) {
+				return;
+			}
+
+			if (
+				e.affectsConfiguration('go.useLanguageServer') ||
+				e.affectsConfiguration('go.languageServerFlags') ||
+				e.affectsConfiguration('go.alternateTools') ||
+				e.affectsConfiguration('go.toolsEnvVars') ||
+				e.affectsConfiguration('go.formatTool')
+				// TODO: Should we check http.proxy too? That affects toolExecutionEnvironment too.
+			) {
+				vscode.commands.executeCommand('go.languageserver.restart', RestartReason.CONFIG_CHANGE);
+			}
+
+			if (e.affectsConfiguration('go.useLanguageServer') && goConfig['useLanguageServer'] === false) {
+				void promptAboutGoplsOptOut(goCtx);
+			}
+		})
 	);
 	ctx.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration(async (e: vscode.ConfigurationChangeEvent) => {
 			if (!e.affectsConfiguration('go')) {
 				return;
 			}
-			const updatedGoConfig = getGoConfig();
+			const goConfig = getGoConfig();
+			const goplsConfig = getGoplsConfig();
+
+			void validateConfig(goConfig, goplsConfig);
 
 			if (e.affectsConfiguration('go.goroot')) {
-				const configGOROOT = updatedGoConfig['goroot'];
+				const configGOROOT = goConfig['goroot'];
 				if (configGOROOT) {
 					await setGOROOTEnvVar(configGOROOT);
 				}
@@ -292,7 +303,7 @@ function addOnDidChangeConfigListeners(ctx: vscode.ExtensionContext) {
 				e.affectsConfiguration('go.toolsEnvVars') ||
 				e.affectsConfiguration('go.testEnvFile')
 			) {
-				updateGoVarsFromConfig(goCtx);
+				void updateGoVarsFromConfig(goCtx);
 			}
 			// If there was a change in "toolsGopath" setting, then clear cache for go tools
 			if (getToolsGopath() !== getToolsGopath(false)) {
@@ -300,16 +311,13 @@ function addOnDidChangeConfigListeners(ctx: vscode.ExtensionContext) {
 			}
 
 			if (e.affectsConfiguration('go.formatTool')) {
-				checkToolExists(getFormatTool(updatedGoConfig));
-			}
-			if (e.affectsConfiguration('go.lintTool')) {
-				checkToolExists(updatedGoConfig['lintTool']);
+				checkToolExists(getFormatTool(goConfig));
 			}
 			if (e.affectsConfiguration('go.docsTool')) {
-				checkToolExists(updatedGoConfig['docsTool']);
+				checkToolExists(goConfig['docsTool']);
 			}
 			if (e.affectsConfiguration('go.coverageDecorator')) {
-				updateCodeCoverageDecorators(updatedGoConfig['coverageDecorator']);
+				updateCodeCoverageDecorators(goConfig['coverageDecorator']);
 			}
 			if (e.affectsConfiguration('go.toolsEnvVars')) {
 				const env = toolExecutionEnvironment();
@@ -324,22 +332,15 @@ function addOnDidChangeConfigListeners(ctx: vscode.ExtensionContext) {
 				}
 			}
 			if (e.affectsConfiguration('go.lintTool')) {
-				const lintTool = lintDiagnosticCollectionName(updatedGoConfig['lintTool']);
+				checkToolExists(goConfig['lintTool']);
+
+				const lintTool = lintDiagnosticCollectionName(goConfig['lintTool']);
 				if (goCtx.lintDiagnosticCollection && goCtx.lintDiagnosticCollection.name !== lintTool) {
 					goCtx.lintDiagnosticCollection.dispose();
 					goCtx.lintDiagnosticCollection = vscode.languages.createDiagnosticCollection(lintTool);
 					ctx.subscriptions.push(goCtx.lintDiagnosticCollection);
 					// TODO: actively maintain our own disposables instead of keeping pushing to ctx.subscription.
 				}
-			}
-			if (e.affectsConfiguration('go.testExplorer.enable')) {
-				const msg =
-					'Go test explorer has been enabled or disabled. For this change to take effect, the window must be reloaded.';
-				vscode.window.showInformationMessage(msg, 'Reload').then((selected) => {
-					if (selected === 'Reload') {
-						vscode.commands.executeCommand('workbench.action.reloadWindow');
-					}
-				});
 			}
 		})
 	);
@@ -396,8 +397,11 @@ function addOnChangeActiveTextEditorListeners(ctx: vscode.ExtensionContext) {
 }
 
 function checkToolExists(tool: string) {
+	if (tool === '') {
+		return;
+	}
 	if (tool === getBinPath(tool)) {
-		promptForMissingTool(tool);
+		void promptForMissingTool(tool);
 	}
 }
 
